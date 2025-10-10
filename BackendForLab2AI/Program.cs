@@ -22,10 +22,16 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<MovieContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+//// Add HTTP Client for Ollama
+//builder.Services.AddHttpClient("Ollama", client =>
+//{
+//    client.BaseAddress = new Uri("http://localhost:11434/");
+//    client.Timeout = TimeSpan.FromMinutes(5);
+//});
 // Add HTTP Client for Ollama
 builder.Services.AddHttpClient("Ollama", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:11434/");
+    client.BaseAddress = new Uri("http://host.docker.internal:11434/");
     client.Timeout = TimeSpan.FromMinutes(5);
 });
 

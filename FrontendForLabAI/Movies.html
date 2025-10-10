@@ -4,8 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Movie Database</title>
+    <title>Movie Database & Recommendations</title>
     <style>
+        /* Стили остаются такими же как в предыдущей версии */
         * {
             margin: 0;
             padding: 0;
@@ -45,13 +46,21 @@
             font-size: 1.2rem;
         }
 
-        .search-section {
+        .section {
             background: rgba(255, 255, 255, 0.1);
             padding: 30px;
             border-radius: 15px;
             margin-bottom: 30px;
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .section-title {
+            color: #feca57;
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #feca57;
+            padding-bottom: 10px;
         }
 
         .search-form {
@@ -72,7 +81,8 @@
             font-weight: 600;
         }
 
-        input {
+        input,
+        select {
             width: 100%;
             padding: 12px 15px;
             border: none;
@@ -82,7 +92,8 @@
             transition: all 0.3s ease;
         }
 
-        input:focus {
+        input:focus,
+        select:focus {
             outline: none;
             background: white;
             box-shadow: 0 0 0 3px rgba(254, 202, 87, 0.3);
@@ -118,6 +129,30 @@
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             animation: fadeIn 0.5s ease;
+        }
+
+        .recommendation-card {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4ecdc4;
+            transition: all 0.3s ease;
+        }
+
+        .recommendation-card:hover {
+            transform: translateX(5px);
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .similarity-badge {
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-left: 10px;
         }
 
         @keyframes fadeIn {
@@ -216,16 +251,68 @@
             display: none;
         }
 
-        .cors-fix {
+        .recommendations-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
             margin-top: 20px;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            border-left: 4px solid #4ecdc4;
         }
 
-        .overview-section {
+        .recommendation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .recommendation-title {
+            font-size: 1.2rem;
+            color: #feca57;
+            margin: 0;
+        }
+
+        .recommendation-overview {
+            color: #b8b8b8;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            margin-bottom: 10px;
+        }
+
+        .recommendation-details {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            font-size: 0.85rem;
+            color: #b8b8b8;
+        }
+
+        .tab-buttons {
+            display: flex;
+            gap: 10px;
             margin-bottom: 20px;
+        }
+
+        .tab-button {
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border: none;
+            border-radius: 8px;
+            color: #b8b8b8;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .tab-button.active {
+            background: linear-gradient(45deg, #ff6b6b, #feca57);
+            color: #1a1a2e;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
         }
 
         @media (max-width: 768px) {
@@ -246,6 +333,10 @@
             h1 {
                 font-size: 2rem;
             }
+
+            .recommendations-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -253,11 +344,13 @@
 <body>
     <div class="container">
         <header>
-            <h1>🎬 Movie Database</h1>
-            <p class="subtitle">Explore and discover amazing movies from our collection</p>
+            <h1>🎬 Movie Database & AI Recommendations</h1>
+            <p class="subtitle">Explore movies and get intelligent recommendations</p>
         </header>
 
-        <section class="search-section">
+        <!-- Search Section -->
+        <section class="section">
+            <h2 class="section-title">🔍 Search Movies</h2>
             <div class="search-form">
                 <div class="input-group">
                     <label for="movieId">Search by Movie ID:</label>
@@ -271,6 +364,78 @@
             </div>
         </section>
 
+        <!-- Recommendations Section -->
+        <section class="section">
+            <h2 class="section-title">🤖 AI Movie Recommendations</h2>
+
+            <div class="tab-buttons">
+                <button class="tab-button active" onclick="switchTab('byDescription')">By Description</button>
+                <button class="tab-button" onclick="switchTab('byMovieTitle')">By Movie Title</button>
+                <button class="tab-button" onclick="switchTab('compareModels')">Compare Models</button>
+            </div>
+
+            <!-- By Description Tab -->
+            <div id="byDescription" class="tab-content active">
+                <div class="search-form">
+                    <div class="input-group">
+                        <label for="description">Movie Description:</label>
+                        <input type="text" id="description" placeholder="Describe what you want to watch...">
+                    </div>
+                    <div class="input-group">
+                        <label for="topK">Number of Results:</label>
+                        <select id="topK">
+                            <option value="5">5 movies</option>
+                            <option value="10" selected>10 movies</option>
+                            <option value="15">15 movies</option>
+                        </select>
+                    </div>
+                    <button type="button" onclick="getRecommendationsByDescription()">Get Recommendations</button>
+                </div>
+            </div>
+
+            <!-- By Movie Title Tab -->
+            <div id="byMovieTitle" class="tab-content">
+                <div class="search-form">
+                    <div class="input-group">
+                        <label for="recommendationMovieTitle">Movie Title:</label>
+                        <input type="text" id="recommendationMovieTitle" placeholder="Enter a movie title...">
+                    </div>
+                    <div class="input-group">
+                        <label for="topKTitle">Number of Results:</label>
+                        <select id="topKTitle">
+                            <option value="5">5 movies</option>
+                            <option value="10" selected>10 movies</option>
+                            <option value="15">15 movies</option>
+                        </select>
+                    </div>
+                    <button type="button" onclick="getRecommendationsByTitle()">Find Similar Movies</button>
+                </div>
+            </div>
+
+            <!-- Compare Models Tab -->
+            <div id="compareModels" class="tab-content">
+                <div class="search-form">
+                    <div class="input-group">
+                        <label for="compareQuery">Search Query:</label>
+                        <input type="text" id="compareQuery" placeholder="Enter a search query...">
+                    </div>
+                    <button type="button" onclick="compareModels()">Compare AI Models</button>
+                </div>
+            </div>
+
+            <!-- Precompute Embeddings -->
+            <div style="margin-top: 20px; text-align: center;">
+                <button type="button" onclick="precomputeEmbeddings()"
+                    style="background: linear-gradient(45deg, #4ecdc4, #44a08d);">
+                    🚀 Precompute All Embeddings
+                </button>
+                <p style="color: #b8b8b8; font-size: 0.9rem; margin-top: 10px;">
+                    This will generate AI embeddings for all movies (run once for better performance)
+                </p>
+            </div>
+        </section>
+
+        <!-- Loading and Error Sections -->
         <div id="loading" class="loading hidden">
             <p>Loading movie data...</p>
         </div>
@@ -279,6 +444,7 @@
             <p id="errorMessage"></p>
         </div>
 
+        <!-- Movie Results -->
         <div id="movieResult" class="hidden">
             <!-- Movie card will be inserted here -->
         </div>
@@ -286,24 +452,64 @@
         <div id="noResults" class="error hidden">
             <p>No movie found. Please check the ID or title and try again.</p>
         </div>
+
+        <!-- Recommendations Results -->
+        <div id="recommendationsResult" class="hidden">
+            <h2 class="section-title">🎯 Recommendations</h2>
+            <div id="recommendationsList"></div>
+        </div>
+
+        <!-- Compare Models Results -->
+        <div id="compareResults" class="hidden">
+            <h2 class="section-title">📊 Model Comparison</h2>
+            <div id="compareList"></div>
+        </div>
+
+        <!-- Debug Info -->
+        <div id="debugInfo" class="section hidden" style="background: rgba(255,255,255,0.05);">
+            <h3 class="section-title">🐛 Debug Information</h3>
+            <pre id="debugContent" style="color: #b8b8b8; font-family: monospace; white-space: pre-wrap;"></pre>
+        </div>
     </div>
 
     <script>
-        //const API_BASE_URL = 'https://localhost:44372/api/movies';
-        const API_BASE_URL = 'http://localhost:8080/api/movies';
+        // Пробуем разные URL для поиска проблемы
+        const API_BASE_URLS = [
+            'http://localhost:8080/api',
+            'http://localhost:5000/api',
+            'https://localhost:5001/api',
+            'https://localhost:44372/api'
+        ];
+
+        let currentApiBase = API_BASE_URLS[0];
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
         async function searchMovie() {
             const movieId = document.getElementById('movieId').value;
             const movieTitle = document.getElementById('movieTitle').value;
 
             hideAllSections();
             showLoading();
+            clearDebug();
 
             try {
                 let movie = null;
 
                 if (movieId) {
+                    debugLog(`Searching by ID: ${movieId}`);
                     movie = await fetchMovieById(movieId);
                 } else if (movieTitle) {
+                    debugLog(`Searching by title: ${movieTitle}`);
                     movie = await fetchMovieByTitle(movieTitle);
                 } else {
                     showError('Please enter either a movie ID or title');
@@ -311,54 +517,85 @@
                 }
 
                 if (movie) {
+                    debugLog('Movie found:', movie);
                     displayMovie(movie);
                 } else {
+                    debugLog('No movie found');
                     showNoResults();
                 }
             } catch (error) {
                 console.error('Fetch error:', error);
-                showError('Failed to fetch movie data: ' + error.message +
-                    '. This is likely a CORS issue. See instructions above.');
+                debugLog('Error:', error.message);
+                showError('Failed to fetch movie data: ' + error.message);
             } finally {
                 hideLoading();
             }
         }
 
         async function fetchMovieById(id) {
-            const response = await fetch(`${API_BASE_URL}/${id}`, {
-                method: 'GET',
-                mode: 'cors',
-                headers: {
-                    'Accept': 'application/json',
-                }
-            });
+            debugLog(`Trying to fetch movie by ID from: ${currentApiBase}/movies/${id}`);
 
-            if (!response.ok) {
-                if (response.status === 404) {
-                    return null;
+            for (const baseUrl of API_BASE_URLS) {
+                try {
+                    debugLog(`Trying URL: ${baseUrl}/movies/${id}`);
+                    const response = await fetch(`${baseUrl}/movies/${id}`, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json',
+                        }
+                    });
+
+                    debugLog(`Response status: ${response.status}`);
+
+                    if (response.ok) {
+                        currentApiBase = baseUrl;
+                        debugLog(`✅ Success! Using base URL: ${baseUrl}`);
+                        const movie = await response.json();
+                        return movie;
+                    } else if (response.status === 404) {
+                        return null;
+                    }
+                } catch (error) {
+                    debugLog(`Failed with ${baseUrl}: ${error.message}`);
+                    continue;
                 }
-                throw new Error(`HTTP error! status: ${response.status}`);
             }
-            return await response.json();
+
+            throw new Error('All API endpoints failed');
         }
 
         async function fetchMovieByTitle(title) {
-            const response = await fetch(`${API_BASE_URL}/title/${encodeURIComponent(title)}`, {
-                method: 'GET',
-                mode: 'cors',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                }
-            });
+            debugLog(`Trying to fetch movie by title: "${title}"`);
 
-            if (!response.ok) {
-                if (response.status === 404) {
-                    return null;
+            for (const baseUrl of API_BASE_URLS) {
+                try {
+                    const url = `${baseUrl}/movies/title/${encodeURIComponent(title)}`;
+                    debugLog(`Trying URL: ${url}`);
+
+                    const response = await fetch(url, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json',
+                        }
+                    });
+
+                    debugLog(`Response status: ${response.status}`);
+
+                    if (response.ok) {
+                        currentApiBase = baseUrl;
+                        debugLog(`✅ Success! Using base URL: ${baseUrl}`);
+                        const movie = await response.json();
+                        return movie;
+                    } else if (response.status === 404) {
+                        return null;
+                    }
+                } catch (error) {
+                    debugLog(`Failed with ${baseUrl}: ${error.message}`);
+                    continue;
                 }
-                throw new Error(`HTTP error! status: ${response.status}`);
             }
-            return await response.json();
+
+            throw new Error('All API endpoints failed');
         }
 
         function displayMovie(movie) {
@@ -449,18 +686,248 @@
             movieResult.classList.remove('hidden');
         }
 
-        function formatDate(dateString) {
-            if (!dateString) return 'Unknown';
-            try {
-                const date = new Date(dateString);
-                return date.toLocaleDateString('en-US', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                });
-            } catch {
-                return dateString;
+        // Остальные функции остаются такими же...
+        async function getRecommendationsByDescription() {
+            const description = document.getElementById('description').value;
+            const topK = document.getElementById('topK').value;
+
+            if (!description) {
+                showError('Please enter a movie description');
+                return;
             }
+
+            hideAllSections();
+            showLoading();
+            clearDebug();
+
+            try {
+                debugLog(`Getting recommendations for: "${description}"`);
+                const response = await fetch(`${currentApiBase}/recommendations/similar`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        Description: description,
+                        TopK: parseInt(topK),
+                        Model: "nomic-embed-text",
+                        DistanceMetric: "cosine"
+                    })
+                });
+
+                debugLog(`Response status: ${response.status}`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const recommendations = await response.json();
+                debugLog(`Received ${recommendations.length} recommendations`);
+                displayRecommendations(recommendations, `Recommendations for: "${description}"`);
+            } catch (error) {
+                console.error('Recommendation error:', error);
+                debugLog('Error:', error.message);
+                showError('Failed to get recommendations: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function getRecommendationsByTitle() {
+            const movieTitle = document.getElementById('recommendationMovieTitle').value;
+            const topK = document.getElementById('topKTitle').value;
+
+            if (!movieTitle) {
+                showError('Please enter a movie title');
+                return;
+            }
+
+            hideAllSections();
+            showLoading();
+            clearDebug();
+
+            try {
+                debugLog(`Getting similar movies for: "${movieTitle}"`);
+                const response = await fetch(`${currentApiBase}/recommendations/similar`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        MovieTitle: movieTitle,
+                        TopK: parseInt(topK),
+                        Model: "nomic-embed-text",
+                        DistanceMetric: "cosine"
+                    })
+                });
+
+                debugLog(`Response status: ${response.status}`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const recommendations = await response.json();
+                debugLog(`Received ${recommendations.length} recommendations`);
+                displayRecommendations(recommendations, `Movies similar to: "${movieTitle}"`);
+            } catch (error) {
+                console.error('Recommendation error:', error);
+                debugLog('Error:', error.message);
+                showError('Failed to get recommendations: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function compareModels() {
+            const query = document.getElementById('compareQuery').value;
+
+            if (!query) {
+                showError('Please enter a search query');
+                return;
+            }
+
+            hideAllSections();
+            showLoading();
+            clearDebug();
+
+            try {
+                debugLog(`Comparing models for: "${query}"`);
+                const response = await fetch(`${currentApiBase}/recommendations/compare-models`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify(query)
+                });
+
+                debugLog(`Response status: ${response.status}`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const results = await response.json();
+                debugLog(`Received comparison results`);
+                displayModelComparison(results, query);
+            } catch (error) {
+                console.error('Model comparison error:', error);
+                debugLog('Error:', error.message);
+                showError('Failed to compare models: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        async function precomputeEmbeddings() {
+            hideAllSections();
+            showLoading();
+            clearDebug();
+
+            try {
+                debugLog('Precomputing embeddings...');
+                const response = await fetch(`${currentApiBase}/recommendations/precompute?model=nomic-embed-text`, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+
+                debugLog(`Response status: ${response.status}`);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                debugLog('Precompute result:', result);
+                showMessage(`✅ ${result.message}`, 'success');
+            } catch (error) {
+                console.error('Precompute error:', error);
+                debugLog('Error:', error.message);
+                showError('Failed to precompute embeddings: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displayRecommendations(recommendations, title) {
+            const recommendationsList = document.getElementById('recommendationsList');
+            const recommendationsResult = document.getElementById('recommendationsResult');
+
+            if (!recommendations || recommendations.length === 0) {
+                recommendationsList.innerHTML = '<div class="error">No recommendations found</div>';
+                recommendationsResult.classList.remove('hidden');
+                return;
+            }
+
+            let html = `<h3 style="color: #feca57; margin-bottom: 20px;">${title}</h3>`;
+
+            recommendations.forEach(rec => {
+                html += `
+                    <div class="recommendation-card">
+                        <div class="recommendation-header">
+                            <h3 class="recommendation-title">${escapeHtml(rec.movie.title || 'Unknown Title')}</h3>
+                            <span class="similarity-badge">${(rec.similarityScore * 100).toFixed(1)}% match</span>
+                        </div>
+                        ${rec.movie.overview ? `
+                            <div class="recommendation-overview">${escapeHtml(rec.movie.overview)}</div>
+                        ` : ''}
+                        <div class="recommendation-details">
+                            ${rec.movie.genre ? `<span>🎭 ${escapeHtml(rec.movie.genre)}</span>` : ''}
+                            ${rec.movie.year ? `<span>📅 ${rec.movie.year}</span>` : ''}
+                            ${rec.movie.rating ? `<span>⭐ ${rec.movie.rating}/10</span>` : ''}
+                        </div>
+                        ${rec.distanceMetric ? `<div style="color: #b8b8b8; font-size: 0.8rem; margin-top: 5px;">Distance: ${rec.distanceMetric}</div>` : ''}
+                    </div>
+                `;
+            });
+
+            recommendationsList.innerHTML = html;
+            recommendationsResult.classList.remove('hidden');
+            document.getElementById('compareResults').classList.add('hidden');
+        }
+
+        function displayModelComparison(results, query) {
+            const compareList = document.getElementById('compareList');
+            const compareResults = document.getElementById('compareResults');
+
+            if (!results || results.length === 0) {
+                compareList.innerHTML = '<div class="error">No comparison results found</div>';
+                compareResults.classList.remove('hidden');
+                return;
+            }
+
+            let html = `<h3 style="color: #feca57; margin-bottom: 20px;">Comparison for: "${query}"</h3>`;
+
+            const grouped = {};
+            results.forEach(rec => {
+                const model = rec.distanceMetric || 'default';
+                if (!grouped[model]) grouped[model] = [];
+                grouped[model].push(rec);
+            });
+
+            for (const [model, recommendations] of Object.entries(grouped)) {
+                html += `
+                    <div class="movie-card">
+                        <h3 style="color: #4ecdc4; margin-bottom: 15px;">Model: ${model}</h3>
+                        ${recommendations.slice(0, 3).map(rec => `
+                            <div style="margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
+                                <strong>${escapeHtml(rec.movie.title)}</strong>
+                                <span class="similarity-badge">${(rec.similarityScore * 100).toFixed(1)}%</span>
+                                ${rec.movie.overview ? `<div style="color: #b8b8b8; font-size: 0.9rem; margin-top: 5px;">${escapeHtml(rec.movie.overview.substring(0, 100))}...</div>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            compareList.innerHTML = html;
+            compareResults.classList.remove('hidden');
+            document.getElementById('recommendationsResult').classList.add('hidden');
         }
 
         function hideAllSections() {
@@ -468,6 +935,8 @@
             document.getElementById('error').classList.add('hidden');
             document.getElementById('movieResult').classList.add('hidden');
             document.getElementById('noResults').classList.add('hidden');
+            document.getElementById('recommendationsResult').classList.add('hidden');
+            document.getElementById('compareResults').classList.add('hidden');
         }
 
         function showLoading() {
@@ -483,8 +952,32 @@
             document.getElementById('error').classList.remove('hidden');
         }
 
+        function showMessage(message, type = 'info') {
+            const errorDiv = document.getElementById('error');
+            errorDiv.className = type === 'success' ? 'warning' : 'error';
+            document.getElementById('errorMessage').textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
         function showNoResults() {
             document.getElementById('noResults').classList.remove('hidden');
+        }
+
+        function debugLog(...args) {
+            console.log(...args);
+            const debugContent = document.getElementById('debugContent');
+            const debugInfo = document.getElementById('debugInfo');
+
+            debugContent.textContent += args.map(arg =>
+                typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+            ).join(' ') + '\n';
+
+            debugInfo.classList.remove('hidden');
+        }
+
+        function clearDebug() {
+            document.getElementById('debugContent').textContent = '';
+            document.getElementById('debugInfo').classList.add('hidden');
         }
 
         function escapeHtml(unsafe) {
@@ -497,20 +990,42 @@
                 .replace(/'/g, "&#039;");
         }
 
-        // Allow searching with Enter key
-        document.getElementById('movieId').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') {
-                searchMovie();
+        function formatDate(dateString) {
+            if (!dateString) return 'Unknown';
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+            } catch {
+                return dateString;
             }
+        }
+
+        // Event listeners
+        document.getElementById('movieId').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') searchMovie();
         });
 
         document.getElementById('movieTitle').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') {
-                searchMovie();
-            }
+            if (e.key === 'Enter') searchMovie();
         });
 
-        // Clear title field when ID field is used and vice versa
+        document.getElementById('description').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') getRecommendationsByDescription();
+        });
+
+        document.getElementById('recommendationMovieTitle').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') getRecommendationsByTitle();
+        });
+
+        document.getElementById('compareQuery').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') compareModels();
+        });
+
+        // Clear fields logic
         document.getElementById('movieId').addEventListener('input', function () {
             if (this.value) {
                 document.getElementById('movieTitle').value = '';
@@ -523,10 +1038,9 @@
             }
         });
 
-        // Auto-search for movie ID 10 on page load
+        // Auto-detect API on load
         window.addEventListener('load', function () {
-            document.getElementById('movieId').value = '10';
-            // searchMovie(); // Uncomment this if you want to auto-search on load
+            debugLog('Page loaded. Testing API endpoints...');
         });
     </script>
 </body>
