@@ -22,8 +22,16 @@ builder.Services.AddOpenApi();
 builder.Services.AddDbContext<MovieContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
+// Add HTTP Client for Ollama
+builder.Services.AddHttpClient("Ollama", client =>
+{
+    client.BaseAddress = new Uri("http://localhost:11434/");
+    client.Timeout = TimeSpan.FromMinutes(5);
+});
+
 // Add services
 builder.Services.AddScoped<IMovieService, MovieService>();
+builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 
 var app = builder.Build();
 
@@ -31,6 +39,7 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+
 app.UseCors("AllowAll");
 
 app.UseHttpsRedirection();
@@ -41,10 +50,28 @@ app.MapControllers();
 
 // Initialize database with movies from JSON
 await InitializeDatabaseAsync(app);
-
+app.MapGet("/", () => "OK");
 
 app.Run();
 
+
+//async Task InitializeDatabaseAsync(WebApplication app)
+//{
+//    using var scope = app.Services.CreateScope();
+//    var services = scope.ServiceProvider;
+
+//    try
+//    {
+//        var context = services.GetRequiredService<MovieContext>();
+//        await context.InitializeDatabaseAsync();
+//        Console.WriteLine("Database initialized successfully with movie data.");
+//    }
+//    catch (Exception ex)
+//    {
+//        var logger = services.GetRequiredService<ILogger<Program>>();
+//        logger.LogError(ex, "An error occurred while initializing the database.");
+//    }
+//}
 
 async Task InitializeDatabaseAsync(WebApplication app)
 {
@@ -54,6 +81,25 @@ async Task InitializeDatabaseAsync(WebApplication app)
     try
     {
         var context = services.GetRequiredService<MovieContext>();
+
+        // ∆дем пока база данных станет доступна
+        var retries = 10;
+        while (retries > 0)
+        {
+            try
+            {
+                Console.WriteLine("Attempting to connect to database...");
+                await context.Database.CanConnectAsync();
+                break;
+            }
+            catch (Exception)
+            {
+                retries--;
+                Console.WriteLine($"Database not ready yet. Retries left: {retries}");
+                await Task.Delay(5000);
+            }
+        }
+
         await context.InitializeDatabaseAsync();
         Console.WriteLine("Database initialized successfully with movie data.");
     }
