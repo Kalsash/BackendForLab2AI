@@ -315,9 +315,20 @@
             display: block;
         }
 
+        .model-options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
         @media (max-width: 768px) {
             .search-form {
                 flex-direction: column;
+            }
+
+            .model-options {
+                grid-template-columns: 1fr;
             }
 
             button {
@@ -371,7 +382,27 @@
             <div class="tab-buttons">
                 <button class="tab-button active" onclick="switchTab('byDescription')">By Description</button>
                 <button class="tab-button" onclick="switchTab('byMovieTitle')">By Movie Title</button>
-                <button class="tab-button" onclick="switchTab('compareModels')">Compare Models</button>
+            </div>
+
+            <!-- AI Model and Distance Metric Selection -->
+            <div class="model-options">
+                <div class="input-group">
+                    <label for="embeddingModel">AI Model:</label>
+                    <select id="embeddingModel">
+                        <option value="nomic-embed-text">nomic-embed-text</option>
+                        <option value="all-minilm">all-minilm</option>
+                        <option value="bge-m3">bge-m3</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="distanceMetric">Distance Metric:</label>
+                    <select id="distanceMetric">
+                        <option value="cosine">Cosine Similarity</option>
+                        <option value="euclidean">Euclidean Distance</option>
+                        <option value="manhattan">Manhattan Distance</option>
+                        <option value="dot">Dot Product</option>
+                    </select>
+                </div>
             </div>
 
             <!-- By Description Tab -->
@@ -412,17 +443,6 @@
                 </div>
             </div>
 
-            <!-- Compare Models Tab -->
-            <div id="compareModels" class="tab-content">
-                <div class="search-form">
-                    <div class="input-group">
-                        <label for="compareQuery">Search Query:</label>
-                        <input type="text" id="compareQuery" placeholder="Enter a search query...">
-                    </div>
-                    <button type="button" onclick="compareModels()">Compare AI Models</button>
-                </div>
-            </div>
-
             <!-- Precompute Embeddings -->
             <div style="margin-top: 20px; text-align: center;">
                 <button type="button" onclick="precomputeEmbeddings()"
@@ -457,12 +477,6 @@
         <div id="recommendationsResult" class="hidden">
             <h2 class="section-title">🎯 Recommendations</h2>
             <div id="recommendationsList"></div>
-        </div>
-
-        <!-- Compare Models Results -->
-        <div id="compareResults" class="hidden">
-            <h2 class="section-title">📊 Model Comparison</h2>
-            <div id="compareList"></div>
         </div>
 
         <!-- Debug Info -->
@@ -686,10 +700,11 @@
             movieResult.classList.remove('hidden');
         }
 
-        // Остальные функции остаются такими же...
         async function getRecommendationsByDescription() {
             const description = document.getElementById('description').value;
             const topK = document.getElementById('topK').value;
+            const model = document.getElementById('embeddingModel').value;
+            const distanceMetric = document.getElementById('distanceMetric').value;
 
             if (!description) {
                 showError('Please enter a movie description');
@@ -702,6 +717,8 @@
 
             try {
                 debugLog(`Getting recommendations for: "${description}"`);
+                debugLog(`Using model: ${model}, distance metric: ${distanceMetric}`);
+
                 const response = await fetch(`${currentApiBase}/recommendations/similar`, {
                     method: 'POST',
                     headers: {
@@ -711,8 +728,8 @@
                     body: JSON.stringify({
                         Description: description,
                         TopK: parseInt(topK),
-                        Model: "nomic-embed-text",
-                        DistanceMetric: "cosine"
+                        Model: model,
+                        DistanceMetric: distanceMetric
                     })
                 });
 
@@ -737,6 +754,8 @@
         async function getRecommendationsByTitle() {
             const movieTitle = document.getElementById('recommendationMovieTitle').value;
             const topK = document.getElementById('topKTitle').value;
+            const model = document.getElementById('embeddingModel').value;
+            const distanceMetric = document.getElementById('distanceMetric').value;
 
             if (!movieTitle) {
                 showError('Please enter a movie title');
@@ -749,6 +768,8 @@
 
             try {
                 debugLog(`Getting similar movies for: "${movieTitle}"`);
+                debugLog(`Using model: ${model}, distance metric: ${distanceMetric}`);
+
                 const response = await fetch(`${currentApiBase}/recommendations/similar`, {
                     method: 'POST',
                     headers: {
@@ -758,8 +779,8 @@
                     body: JSON.stringify({
                         MovieTitle: movieTitle,
                         TopK: parseInt(topK),
-                        Model: "nomic-embed-text",
-                        DistanceMetric: "cosine"
+                        Model: model,
+                        DistanceMetric: distanceMetric
                     })
                 });
 
@@ -781,55 +802,16 @@
             }
         }
 
-        async function compareModels() {
-            const query = document.getElementById('compareQuery').value;
-
-            if (!query) {
-                showError('Please enter a search query');
-                return;
-            }
-
-            hideAllSections();
-            showLoading();
-            clearDebug();
-
-            try {
-                debugLog(`Comparing models for: "${query}"`);
-                const response = await fetch(`${currentApiBase}/recommendations/compare-models`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify(query)
-                });
-
-                debugLog(`Response status: ${response.status}`);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const results = await response.json();
-                debugLog(`Received comparison results`);
-                displayModelComparison(results, query);
-            } catch (error) {
-                console.error('Model comparison error:', error);
-                debugLog('Error:', error.message);
-                showError('Failed to compare models: ' + error.message);
-            } finally {
-                hideLoading();
-            }
-        }
-
         async function precomputeEmbeddings() {
+            const model = document.getElementById('embeddingModel').value;
+
             hideAllSections();
             showLoading();
             clearDebug();
 
             try {
                 debugLog('Precomputing embeddings...');
-                const response = await fetch(`${currentApiBase}/recommendations/precompute?model=nomic-embed-text`, {
+                const response = await fetch(`${currentApiBase}/recommendations/precompute?model=${model}`, {
                     method: 'POST',
                     headers: {
                         'Accept': 'application/json'
@@ -864,7 +846,13 @@
                 return;
             }
 
+            const model = document.getElementById('embeddingModel').value;
+            const distanceMetric = document.getElementById('distanceMetric').value;
+
             let html = `<h3 style="color: #feca57; margin-bottom: 20px;">${title}</h3>`;
+            html += `<div style="color: #b8b8b8; margin-bottom: 15px; font-size: 0.9rem;">
+                        Model: ${model} | Distance: ${distanceMetric}
+                     </div>`;
 
             recommendations.forEach(rec => {
                 html += `
@@ -888,46 +876,6 @@
 
             recommendationsList.innerHTML = html;
             recommendationsResult.classList.remove('hidden');
-            document.getElementById('compareResults').classList.add('hidden');
-        }
-
-        function displayModelComparison(results, query) {
-            const compareList = document.getElementById('compareList');
-            const compareResults = document.getElementById('compareResults');
-
-            if (!results || results.length === 0) {
-                compareList.innerHTML = '<div class="error">No comparison results found</div>';
-                compareResults.classList.remove('hidden');
-                return;
-            }
-
-            let html = `<h3 style="color: #feca57; margin-bottom: 20px;">Comparison for: "${query}"</h3>`;
-
-            const grouped = {};
-            results.forEach(rec => {
-                const model = rec.distanceMetric || 'default';
-                if (!grouped[model]) grouped[model] = [];
-                grouped[model].push(rec);
-            });
-
-            for (const [model, recommendations] of Object.entries(grouped)) {
-                html += `
-                    <div class="movie-card">
-                        <h3 style="color: #4ecdc4; margin-bottom: 15px;">Model: ${model}</h3>
-                        ${recommendations.slice(0, 3).map(rec => `
-                            <div style="margin-bottom: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px;">
-                                <strong>${escapeHtml(rec.movie.title)}</strong>
-                                <span class="similarity-badge">${(rec.similarityScore * 100).toFixed(1)}%</span>
-                                ${rec.movie.overview ? `<div style="color: #b8b8b8; font-size: 0.9rem; margin-top: 5px;">${escapeHtml(rec.movie.overview.substring(0, 100))}...</div>` : ''}
-                            </div>
-                        `).join('')}
-                    </div>
-                `;
-            }
-
-            compareList.innerHTML = html;
-            compareResults.classList.remove('hidden');
-            document.getElementById('recommendationsResult').classList.add('hidden');
         }
 
         function hideAllSections() {
@@ -936,7 +884,6 @@
             document.getElementById('movieResult').classList.add('hidden');
             document.getElementById('noResults').classList.add('hidden');
             document.getElementById('recommendationsResult').classList.add('hidden');
-            document.getElementById('compareResults').classList.add('hidden');
         }
 
         function showLoading() {
@@ -1019,10 +966,6 @@
 
         document.getElementById('recommendationMovieTitle').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') getRecommendationsByTitle();
-        });
-
-        document.getElementById('compareQuery').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') compareModels();
         });
 
         // Clear fields logic
