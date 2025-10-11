@@ -1,4 +1,5 @@
-﻿using BackendForLab2AI.Data;
+﻿// EmbeddingService.cs
+using BackendForLab2AI.Data;
 using BackendForLab2AI.Models;
 using System.Text.Json;
 using System.Text;
@@ -11,6 +12,7 @@ namespace BackendForLab2AI.Services
         private readonly MovieContext _context;
         private readonly HttpClient _httpClient;
         private readonly ILogger<EmbeddingService> _logger;
+        private readonly string _embeddingsCachePath;
 
         // Кэш эмбеддингов для избежания повторных вычислений
         private static readonly Dictionary<string, Dictionary<int, List<float>>> _embeddingCache = new();
@@ -20,7 +22,16 @@ namespace BackendForLab2AI.Services
             _context = context;
             _httpClient = httpClientFactory.CreateClient("Ollama");
             _logger = logger;
+
+            // Создаем папку для кэша эмбеддингов
+            _embeddingsCachePath = Path.Combine(Directory.GetCurrentDirectory(), "EmbeddingsCache");
+            if (!Directory.Exists(_embeddingsCachePath))
+            {
+                Directory.CreateDirectory(_embeddingsCachePath);
+                _logger.LogInformation("Created embeddings cache directory: {Path}", _embeddingsCachePath);
+            }
         }
+
         public async Task<List<float>> GetEmbeddingAsync(string text, string model = "nomic-embed-text")
         {
             try
@@ -69,22 +80,39 @@ namespace BackendForLab2AI.Services
             }
         }
 
-
         public async Task<Dictionary<int, List<float>>> GenerateAllMovieEmbeddingsAsync(string model = "nomic-embed-text")
         {
             var cacheKey = $"{model}_all_movies";
+
+            // 1. Сначала проверяем кэш в памяти
             if (_embeddingCache.ContainsKey(cacheKey))
+            {
+                _logger.LogInformation("✅ Using in-memory cache for model {Model}", model);
                 return _embeddingCache[cacheKey];
+            }
+
+            // 2. Пытаемся загрузить из файлового кэша
+            var cachedEmbeddings = await LoadEmbeddingsFromFileAsync(model);
+            if (cachedEmbeddings.Any())
+            {
+                _logger.LogInformation("✅ Loaded {Count} PRE-COMPUTED embeddings from file for model {Model}",
+                    cachedEmbeddings.Count, model);
+                _embeddingCache[cacheKey] = cachedEmbeddings;
+                return cachedEmbeddings;
+            }
+
+            // 3. Если файлов нет - вычисляем заново
+            _logger.LogWarning("❌ No pre-computed embeddings found for model {Model}. Computing now...", model);
 
             // БЕРЕМ ФИЛЬМЫ ИЗ БАЗЫ ДАННЫХ!
             var movies = await _context.Movies
                 .Where(m => !string.IsNullOrEmpty(m.Overview) && m.Overview.Length > 50)
-                .Take(1000) // Начнем с 1000 фильмов для теста
+                .Take(10000) // Начнем с 10000 фильмов для теста
                 .ToListAsync();
 
             var embeddings = new Dictionary<int, List<float>>();
 
-            Console.WriteLine($"Computing embeddings for {movies.Count} movies...");
+            _logger.LogInformation("Computing embeddings for {Count} movies using model {Model}...", movies.Count, model);
 
             foreach (var movie in movies)
             {
@@ -97,18 +125,159 @@ namespace BackendForLab2AI.Services
                     if (embedding.Any())
                     {
                         embeddings[movie.Id] = embedding;
-                        Console.WriteLine($"Computed embedding for: {movie.Title}");
+                        _logger.LogInformation("Computed embedding for: {Title}", movie.Title);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error computing embedding for movie {movie.Id}: {ex.Message}");
+                    _logger.LogError(ex, "Error computing embedding for movie {MovieId}", movie.Id);
                 }
             }
 
+            // Сохраняем в файловый кэш для будущего использования
+            await SaveEmbeddingsToFileAsync(model, embeddings);
+
+            // Сохраняем в память
             _embeddingCache[cacheKey] = embeddings;
-            Console.WriteLine($"Computed embeddings for {embeddings.Count} movies");
+
+            _logger.LogInformation("✅ Computed and cached embeddings for {Count} movies", embeddings.Count);
             return embeddings;
+        }
+
+        public async Task<bool> SaveEmbeddingsToFileAsync(string model, Dictionary<int, List<float>> embeddings)
+        {
+            try
+            {
+                var fileName = GetEmbeddingsFileName(model);
+                var options = new JsonSerializerOptions { WriteIndented = true };
+
+                var cacheData = new EmbeddingsCache
+                {
+                    Model = model,
+                    CreatedAt = DateTime.UtcNow,
+                    MovieCount = embeddings.Count,
+                    Embeddings = embeddings
+                };
+
+                var json = JsonSerializer.Serialize(cacheData, options);
+                await File.WriteAllTextAsync(fileName, json);
+
+                _logger.LogInformation("💾 Saved {Count} embeddings to {FileName}", embeddings.Count, fileName);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving embeddings to file for model {Model}", model);
+                return false;
+            }
+        }
+
+        public async Task<Dictionary<int, List<float>>> LoadEmbeddingsFromFileAsync(string model)
+        {
+            try
+            {
+                var fileName = GetEmbeddingsFileName(model);
+
+                if (!File.Exists(fileName))
+                {
+                    _logger.LogInformation("Embeddings file not found: {FileName}", fileName);
+                    return new Dictionary<int, List<float>>();
+                }
+
+                var json = await File.ReadAllTextAsync(fileName);
+                var cacheData = JsonSerializer.Deserialize<EmbeddingsCache>(json);
+
+                if (cacheData == null || cacheData.Embeddings == null)
+                {
+                    _logger.LogWarning("Invalid embeddings file format: {FileName}", fileName);
+                    return new Dictionary<int, List<float>>();
+                }
+
+                _logger.LogInformation("📁 Loaded {Count} embeddings from {FileName} (created: {CreatedAt})",
+                    cacheData.MovieCount, fileName, cacheData.CreatedAt);
+
+                return cacheData.Embeddings;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error loading embeddings from file for model {Model}", model);
+                return new Dictionary<int, List<float>>();
+            }
+        }
+
+        public async Task<List<string>> GetAvailableModelsAsync()
+        {
+            var models = new List<string>();
+
+            if (!Directory.Exists(_embeddingsCachePath))
+                return models;
+
+            var files = Directory.GetFiles(_embeddingsCachePath, "embeddings_*.json");
+
+            foreach (var file in files)
+            {
+                try
+                {
+                    var json = await File.ReadAllTextAsync(file);
+                    var cacheData = JsonSerializer.Deserialize<EmbeddingsCache>(json);
+
+                    if (cacheData != null && !string.IsNullOrEmpty(cacheData.Model))
+                    {
+                        models.Add(cacheData.Model);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error reading embeddings file: {File}", file);
+                }
+            }
+
+            return models.Distinct().ToList();
+        }
+
+        public async Task<bool> DeleteEmbeddingsCacheAsync(string model = null)
+        {
+            try
+            {
+                if (model == null)
+                {
+                    // Удаляем все кэши
+                    var files = Directory.GetFiles(_embeddingsCachePath, "embeddings_*.json");
+                    foreach (var file in files)
+                    {
+                        File.Delete(file);
+                    }
+
+                    // Очищаем кэш в памяти
+                    _embeddingCache.Clear();
+
+                    _logger.LogInformation("🗑️ Deleted all embedding caches");
+                    return true;
+                }
+                else
+                {
+                    // Удаляем кэш для конкретной модели
+                    var fileName = GetEmbeddingsFileName(model);
+                    if (File.Exists(fileName))
+                    {
+                        File.Delete(fileName);
+
+                        // Удаляем из кэша в памяти
+                        var cacheKey = $"{model}_all_movies";
+                        _embeddingCache.Remove(cacheKey);
+
+                        _logger.LogInformation("🗑️ Deleted embeddings cache for model {Model}", model);
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting embeddings cache for model {Model}", model);
+                return false;
+            }
         }
 
         public async Task<List<MovieRecommendation>> FindSimilarMoviesAsync(string query, int topK = 10,
@@ -117,7 +286,7 @@ namespace BackendForLab2AI.Services
             // 1. Получаем эмбеддинг запроса пользователя
             var queryEmbedding = await GetEmbeddingAsync(query, model);
 
-            // 2. Получаем эмбеддинги ВСЕХ фильмов из базы данных
+            // 2. Загружаем эмбеддинги фильмов из кэша (файлового или памяти)
             var movieEmbeddings = await GenerateAllMovieEmbeddingsAsync(model);
 
             // 3. Сравниваем запрос с каждым фильмом
@@ -211,6 +380,12 @@ namespace BackendForLab2AI.Services
             return sb.ToString();
         }
 
+        private string GetEmbeddingsFileName(string model)
+        {
+            var safeModelName = model.Replace("-", "_").Replace(" ", "_");
+            return Path.Combine(_embeddingsCachePath, $"embeddings_{safeModelName}.json");
+        }
+
         private double CalculateSimilarity(List<float> vec1, List<float> vec2, string metric)
         {
             if (vec1.Count != vec2.Count)
@@ -237,7 +412,7 @@ namespace BackendForLab2AI.Services
         private double EuclideanSimilarity(List<float> vec1, List<float> vec2)
         {
             var distance = Math.Sqrt(vec1.Zip(vec2, (a, b) => Math.Pow(a - b, 2)).Sum());
-            return 1.0 / (1.0 + distance); // Convert distance to similarity
+            return 1.0 / (1.0 + distance);
         }
 
         private double ManhattanSimilarity(List<float> vec1, List<float> vec2)
@@ -250,5 +425,14 @@ namespace BackendForLab2AI.Services
         {
             return vec1.Zip(vec2, (a, b) => a * b).Sum();
         }
+    }
+
+    // Класс для хранения данных кэша
+    public class EmbeddingsCache
+    {
+        public string Model { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
+        public int MovieCount { get; set; }
+        public Dictionary<int, List<float>> Embeddings { get; set; } = new();
     }
 }

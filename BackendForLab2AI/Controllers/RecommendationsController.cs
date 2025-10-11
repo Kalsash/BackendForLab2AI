@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿// RecommendationsController.cs
+using Microsoft.AspNetCore.Mvc;
 using BackendForLab2AI.Models;
 using BackendForLab2AI.Services;
 namespace BackendForLab2AI.Controllers
@@ -115,6 +116,66 @@ namespace BackendForLab2AI.Controllers
             {
                 _logger.LogError(ex, "Error precomputing embeddings");
                 return StatusCode(500, "Error precomputing embeddings");
+            }
+        }
+
+        // Новые endpoints для управления кэшем
+        [HttpGet("available-models")]
+        public async Task<ActionResult<List<string>>> GetAvailableModels()
+        {
+            try
+            {
+                var models = await _embeddingService.GetAvailableModelsAsync();
+                return Ok(models);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting available models");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        [HttpDelete("cache")]
+        public async Task<ActionResult> DeleteEmbeddingsCache([FromQuery] string model = null)
+        {
+            try
+            {
+                var result = await _embeddingService.DeleteEmbeddingsCacheAsync(model);
+
+                if (result)
+                {
+                    return Ok(new { message = model == null ? "All caches deleted" : $"Cache for model {model} deleted" });
+                }
+                else
+                {
+                    return NotFound(new { message = "Cache not found" });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting embeddings cache");
+                return StatusCode(500, "Internal server error");
+            }
+        }
+
+        [HttpGet("cache-info")]
+        public async Task<ActionResult> GetCacheInfo()
+        {
+            try
+            {
+                var models = await _embeddingService.GetAvailableModelsAsync();
+                var cacheInfo = new
+                {
+                    AvailableModels = models,
+                    CacheDirectory = Path.Combine(Directory.GetCurrentDirectory(), "EmbeddingsCache")
+                };
+
+                return Ok(cacheInfo);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting cache info");
+                return StatusCode(500, "Internal server error");
             }
         }
     }

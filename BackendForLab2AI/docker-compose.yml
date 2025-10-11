@@ -16,6 +16,7 @@ services:
       - db
     volumes:
       - ./MoviesData.json:/app/MoviesData.json
+      - embeddings_cache:/app/EmbeddingsCache  
     restart: unless-stopped
 
   db:
@@ -32,3 +33,4 @@ services:
 
 volumes:
   sqlserver_data:
+  embeddings_cache:  
