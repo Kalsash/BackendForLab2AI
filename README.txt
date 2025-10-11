@@ -31,7 +31,9 @@ ollama pull all-minilm
 ollama pull bge-m3
 
 # 3. Run docker container
-docker-compose up --build
+1) download docker-compose.prod.yml file from github
+2) cd yourforlder with  docker-compose.prod.yml file 
+3) docker-compose -f docker-compose.prod.yml up -d
 
 TEST IN POSTMAN:
 http://localhost:8080/api/recommendations/similar
