@@ -23,7 +23,6 @@ namespace BackendForLab2AI.Services
             _httpClient = httpClientFactory.CreateClient("Ollama");
             _logger = logger;
 
-            // Создаем папку для кэша эмбеддингов
             _embeddingsCachePath = Path.Combine(Directory.GetCurrentDirectory(), "EmbeddingsCache");
             if (!Directory.Exists(_embeddingsCachePath))
             {
@@ -63,7 +62,6 @@ namespace BackendForLab2AI.Services
 
                 var responseJson = await response.Content.ReadAsStringAsync();
 
-                // КРИТИЧЕСКИ ВАЖНО - логируем сырой JSON
                 _logger.LogInformation("RAW JSON RESPONSE: {ResponseJson}", responseJson);
 
                 var embeddingResponse = JsonSerializer.Deserialize<EmbeddingResponse>(responseJson);
@@ -84,14 +82,12 @@ namespace BackendForLab2AI.Services
         {
             var cacheKey = $"{model}_all_movies";
 
-            // 1. Сначала проверяем кэш в памяти
             if (_embeddingCache.ContainsKey(cacheKey))
             {
                 _logger.LogInformation("✅ Using in-memory cache for model {Model}", model);
                 return _embeddingCache[cacheKey];
             }
 
-            // 2. Пытаемся загрузить из файлового кэша
             var cachedEmbeddings = await LoadEmbeddingsFromFileAsync(model);
             if (cachedEmbeddings.Any())
             {
@@ -101,13 +97,11 @@ namespace BackendForLab2AI.Services
                 return cachedEmbeddings;
             }
 
-            // 3. Если файлов нет - вычисляем заново
             _logger.LogWarning("❌ No pre-computed embeddings found for model {Model}. Computing now...", model);
 
-            // БЕРЕМ ФИЛЬМЫ ИЗ БАЗЫ ДАННЫХ!
             var movies = await _context.Movies
                 .Where(m => !string.IsNullOrEmpty(m.Overview) && m.Overview.Length > 50)
-                .Take(10000) // Начнем с 10000 фильмов для теста
+                .Take(10000) 
                 .ToListAsync();
 
             var embeddings = new Dictionary<int, List<float>>();
@@ -118,7 +112,6 @@ namespace BackendForLab2AI.Services
             {
                 try
                 {
-                    // Создаем текст для эмбеддинга из данных фильма
                     var text = BuildMovieText(movie);
                     var embedding = await GetEmbeddingAsync(text, model);
 
@@ -134,10 +127,8 @@ namespace BackendForLab2AI.Services
                 }
             }
 
-            // Сохраняем в файловый кэш для будущего использования
             await SaveEmbeddingsToFileAsync(model, embeddings);
 
-            // Сохраняем в память
             _embeddingCache[cacheKey] = embeddings;
 
             _logger.LogInformation("✅ Computed and cached embeddings for {Count} movies", embeddings.Count);
@@ -241,14 +232,12 @@ namespace BackendForLab2AI.Services
             {
                 if (model == null)
                 {
-                    // Удаляем все кэши
                     var files = Directory.GetFiles(_embeddingsCachePath, "embeddings_*.json");
                     foreach (var file in files)
                     {
                         File.Delete(file);
                     }
 
-                    // Очищаем кэш в памяти
                     _embeddingCache.Clear();
 
                     _logger.LogInformation("🗑️ Deleted all embedding caches");
@@ -256,13 +245,10 @@ namespace BackendForLab2AI.Services
                 }
                 else
                 {
-                    // Удаляем кэш для конкретной модели
                     var fileName = GetEmbeddingsFileName(model);
                     if (File.Exists(fileName))
                     {
                         File.Delete(fileName);
-
-                        // Удаляем из кэша в памяти
                         var cacheKey = $"{model}_all_movies";
                         _embeddingCache.Remove(cacheKey);
 
@@ -283,13 +269,10 @@ namespace BackendForLab2AI.Services
         public async Task<List<MovieRecommendation>> FindSimilarMoviesAsync(string query, int topK = 10,
             string model = "nomic-embed-text", string distanceMetric = "cosine")
         {
-            // 1. Получаем эмбеддинг запроса пользователя
             var queryEmbedding = await GetEmbeddingAsync(query, model);
 
-            // 2. Загружаем эмбеддинги фильмов из кэша (файлового или памяти)
             var movieEmbeddings = await GenerateAllMovieEmbeddingsAsync(model);
 
-            // 3. Сравниваем запрос с каждым фильмом
             var similarities = new List<MovieRecommendation>();
 
             foreach (var (movieId, movieEmbedding) in movieEmbeddings)
@@ -308,7 +291,6 @@ namespace BackendForLab2AI.Services
                 }
             }
 
-            // 4. Возвращаем самые похожие
             return similarities
                 .OrderByDescending(s => s.SimilarityScore)
                 .Take(topK)
@@ -427,7 +409,6 @@ namespace BackendForLab2AI.Services
         }
     }
 
-    // Класс для хранения данных кэша
     public class EmbeddingsCache
     {
         public string Model { get; set; } = string.Empty;

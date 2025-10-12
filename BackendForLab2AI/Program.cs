@@ -18,7 +18,6 @@ builder.Services.AddCors(options =>
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
-// Add DbContext
 builder.Services.AddDbContext<MovieContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
@@ -35,7 +34,6 @@ builder.Services.AddHttpClient("Ollama", client =>
     client.Timeout = TimeSpan.FromMinutes(5);
 });
 
-// Add services
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 
@@ -54,7 +52,6 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Initialize database with movies from JSON
 await InitializeDatabaseAsync(app);
 app.MapGet("/", () => "OK");
 
@@ -88,7 +85,6 @@ async Task InitializeDatabaseAsync(WebApplication app)
     {
         var context = services.GetRequiredService<MovieContext>();
 
-        // ∆дем пока база данных станет доступна
         var retries = 10;
         while (retries > 0)
         {

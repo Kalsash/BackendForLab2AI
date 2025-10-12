@@ -115,7 +115,7 @@ namespace BackendForLab2AI.Services
         public async Task<bool> InitializeDatabaseAsync()
         {
             if (await _context.Movies.AnyAsync())
-                return false; // Database already initialized
+                return false; 
 
             var jsonData = await File.ReadAllTextAsync("MoviesData.json");
             var movies = JsonSerializer.Deserialize<List<Movie>>(jsonData, new JsonSerializerOptions

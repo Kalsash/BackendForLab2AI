@@ -17,7 +17,6 @@ namespace BackendForLab2AI.Data
         {
             base.OnModelCreating(modelBuilder);
 
-            // Конфигурация модели Movie
             modelBuilder.Entity<Movie>(entity =>
             {
                 entity.HasKey(e => e.Id);
@@ -29,10 +28,8 @@ namespace BackendForLab2AI.Data
 
         public async Task InitializeDatabaseAsync()
         {
-            // Создаем базу данных, если она не существует
             await Database.EnsureCreatedAsync();
 
-            // Проверяем, есть ли уже данные в базе
             if (!Movies.Any())
             {
                 await SeedMoviesFromJsonAsync();
@@ -52,7 +49,6 @@ namespace BackendForLab2AI.Data
 
                 var jsonData = await File.ReadAllTextAsync(jsonFilePath);
 
-                // Используем настройки для более гибкой десериализации
                 var options = new JsonSerializerOptions
                 {
                     PropertyNameCaseInsensitive = true,
@@ -61,7 +57,6 @@ namespace BackendForLab2AI.Data
                     AllowTrailingCommas = true
                 };
 
-                // Десериализуем как список JsonElement для полного контроля
                 var jsonElements = JsonSerializer.Deserialize<List<JsonElement>>(jsonData, options);
 
                 if (jsonElements != null && jsonElements.Any())
@@ -118,7 +113,6 @@ namespace BackendForLab2AI.Data
         {
             try
             {
-                // Безопасное извлечение всех свойств
                 var movie = new Movie
                 {
                     Adult = SafeGetBool(element, "adult"),
@@ -126,7 +120,7 @@ namespace BackendForLab2AI.Data
                     Budget = SafeGetLong(element, "budget"),
                     Genres = SafeGetString(element, "genres"),
                     Homepage = SafeGetString(element, "homepage"),
-                    MovieId = SafeGetInt(element, "id") ?? index, // используем индекс как fallback ID
+                    MovieId = SafeGetInt(element, "id") ?? index, 
                     ImdbId = SafeGetString(element, "imdbId"),
                     OriginalLanguage = SafeGetString(element, "originalLanguage"),
                     OriginalTitle = SafeGetString(element, "originalTitle") ?? "Unknown",
@@ -214,7 +208,7 @@ namespace BackendForLab2AI.Data
                 else if (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.False)
                     return value.GetBoolean().ToString();
                 else
-                    return value.ToString(); // для объектов и массивов
+                    return value.ToString(); 
             }
             catch
             {

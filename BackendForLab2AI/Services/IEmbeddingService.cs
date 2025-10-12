@@ -1,5 +1,4 @@
-﻿// IEmbeddingService.cs
-using BackendForLab2AI.Models;
+﻿using BackendForLab2AI.Models;
 
 public interface IEmbeddingService
 {
@@ -10,7 +9,6 @@ public interface IEmbeddingService
     Task<List<MovieRecommendation>> CompareEmbeddingModelsAsync(string query);
     Task<List<MovieRecommendation>> CompareDistanceMetricsAsync(string query, string model = "nomic-embed-text");
 
-    // Новые методы для файлового кэширования
     Task<bool> SaveEmbeddingsToFileAsync(string model, Dictionary<int, List<float>> embeddings);
     Task<Dictionary<int, List<float>>> LoadEmbeddingsFromFileAsync(string model);
     Task<List<string>> GetAvailableModelsAsync();

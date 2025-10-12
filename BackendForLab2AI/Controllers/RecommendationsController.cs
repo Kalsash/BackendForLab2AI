@@ -1,5 +1,4 @@
-﻿// RecommendationsController.cs
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using BackendForLab2AI.Models;
 using BackendForLab2AI.Services;
 namespace BackendForLab2AI.Controllers
@@ -119,7 +118,7 @@ namespace BackendForLab2AI.Controllers
             }
         }
 
-        // Новые endpoints для управления кэшем
+        // endpoints для управления кэшем
         [HttpGet("available-models")]
         public async Task<ActionResult<List<string>>> GetAvailableModels()
         {

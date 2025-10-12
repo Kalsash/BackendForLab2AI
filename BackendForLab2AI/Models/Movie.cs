@@ -19,7 +19,7 @@ namespace BackendForLab2AI.Models
 
         public string? Homepage { get; set; }
 
-        public int MovieId { get; set; } // Original ID from JSON
+        public int MovieId { get; set; } 
 
         public string? ImdbId { get; set; }
 
