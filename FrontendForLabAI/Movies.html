@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Movie Database & Recommendations</title>
     <style>
-        /* Стили остаются такими же как в предыдущей версии */
         * {
             margin: 0;
             padding: 0;
@@ -143,16 +142,6 @@
         .recommendation-card:hover {
             transform: translateX(5px);
             background: rgba(255, 255, 255, 0.12);
-        }
-
-        .similarity-badge {
-            background: linear-gradient(45deg, #4ecdc4, #44a08d);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            margin-left: 10px;
         }
 
         @keyframes fadeIn {
@@ -442,17 +431,6 @@
                     <button type="button" onclick="getRecommendationsByTitle()">Find Similar Movies</button>
                 </div>
             </div>
-
-            <!-- Precompute Embeddings -->
-            <div style="margin-top: 20px; text-align: center;">
-                <button type="button" onclick="precomputeEmbeddings()"
-                    style="background: linear-gradient(45deg, #4ecdc4, #44a08d);">
-                    🚀 Precompute All Embeddings
-                </button>
-                <p style="color: #b8b8b8; font-size: 0.9rem; margin-top: 10px;">
-                    This will generate AI embeddings for all movies (run once for better performance)
-                </p>
-            </div>
         </section>
 
         <!-- Loading and Error Sections -->
@@ -487,7 +465,6 @@
     </div>
 
     <script>
-        // Пробуем разные URL для поиска проблемы
         const API_BASE_URLS = [
             'http://localhost:8080/api',
             'http://localhost:5000/api',
@@ -802,40 +779,6 @@
             }
         }
 
-        async function precomputeEmbeddings() {
-            const model = document.getElementById('embeddingModel').value;
-
-            hideAllSections();
-            showLoading();
-            clearDebug();
-
-            try {
-                debugLog('Precomputing embeddings...');
-                const response = await fetch(`${currentApiBase}/recommendations/precompute?model=${model}`, {
-                    method: 'POST',
-                    headers: {
-                        'Accept': 'application/json'
-                    }
-                });
-
-                debugLog(`Response status: ${response.status}`);
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const result = await response.json();
-                debugLog('Precompute result:', result);
-                showMessage(`✅ ${result.message}`, 'success');
-            } catch (error) {
-                console.error('Precompute error:', error);
-                debugLog('Error:', error.message);
-                showError('Failed to precompute embeddings: ' + error.message);
-            } finally {
-                hideLoading();
-            }
-        }
-
         function displayRecommendations(recommendations, title) {
             const recommendationsList = document.getElementById('recommendationsList');
             const recommendationsResult = document.getElementById('recommendationsResult');
@@ -859,7 +802,6 @@
                     <div class="recommendation-card">
                         <div class="recommendation-header">
                             <h3 class="recommendation-title">${escapeHtml(rec.movie.title || 'Unknown Title')}</h3>
-                            <span class="similarity-badge">${(rec.similarityScore * 100).toFixed(1)}% match</span>
                         </div>
                         ${rec.movie.overview ? `
                             <div class="recommendation-overview">${escapeHtml(rec.movie.overview)}</div>
@@ -869,7 +811,6 @@
                             ${rec.movie.year ? `<span>📅 ${rec.movie.year}</span>` : ''}
                             ${rec.movie.rating ? `<span>⭐ ${rec.movie.rating}/10</span>` : ''}
                         </div>
-                        ${rec.distanceMetric ? `<div style="color: #b8b8b8; font-size: 0.8rem; margin-top: 5px;">Distance: ${rec.distanceMetric}</div>` : ''}
                     </div>
                 `;
             });
