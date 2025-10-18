@@ -7,11 +7,41 @@ namespace BackendForLab2AI.Data
 {
     public class MovieContext : DbContext
     {
-        public MovieContext(DbContextOptions<MovieContext> options) : base(options)
+        private readonly ILogger<MovieContext> _logger;
+
+        public MovieContext(DbContextOptions<MovieContext> options, ILogger<MovieContext> logger)
+            : base(options)
         {
+            _logger = logger;
         }
 
+
         public DbSet<Movie> Movies { get; set; }
+
+
+        public async Task CreateVectorIndexAsync()
+        {
+            try
+            {
+                // Удаляем старый индекс если существует
+                await Database.ExecuteSqlRawAsync(@"DROP INDEX IF EXISTS ""IX_Movies_Embedding_Vector""");
+
+                // Создаем новый HNSW индекс
+                await Database.ExecuteSqlRawAsync(@"
+                CREATE INDEX ""IX_Movies_Embedding_Vector"" 
+                ON ""Movies"" 
+                USING hnsw (""Embedding"" vector_cosine_ops)
+                WITH (m = 16, ef_construction = 64, ef_search = 100);
+            ");
+
+                _logger.LogInformation("Vector index created successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create vector index");
+                throw;
+            }
+        }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -23,17 +53,44 @@ namespace BackendForLab2AI.Data
                 entity.Property(e => e.Title).IsRequired();
                 entity.Property(e => e.OriginalTitle).IsRequired();
                 entity.Property(e => e.ReleaseDate).IsRequired(false);
+
+                // Добавляем конфигурацию для векторного поля
+                // VALUE CONVERTER для float[] -> vector
+                //entity.Property(e => e.Embedding)
+                //      .HasColumnType("vector(1536)")
+                //      .HasConversion(
+                //          v => v == null ? null : string.Join(",", v), // float[] -> string
+                //          v => v == null ? null : v.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                //                                  .Select(float.Parse)
+                //                                  .ToArray() // string -> float[]
+                //      );
+                entity.Property(e => e.Embedding)
+              .HasColumnType("real[]"); // Массив float в PostgreSQL
             });
         }
 
         public async Task InitializeDatabaseAsync()
         {
+            try
+            {
+                // Создаем расширение vector
+                await Database.ExecuteSqlRawAsync("CREATE EXTENSION IF NOT EXISTS vector;");
+                _logger.LogInformation("pgvector extension installed successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not install pgvector extension");
+            }
+
             await Database.EnsureCreatedAsync();
 
             if (!Movies.Any())
             {
                 await SeedMoviesFromJsonAsync();
+                await CreateVectorIndexAsync();
             }
+
+          
         }
 
         private async Task SeedMoviesFromJsonAsync()
@@ -95,6 +152,7 @@ namespace BackendForLab2AI.Data
                         await SaveChangesAsync();
 
                         Console.WriteLine($"Successfully seeded {successCount} movies to database.");
+                        _logger.LogInformation($"Successfully seeded {successCount} movies to database.");
                         if (errorCount > 0)
                         {
                             Console.WriteLine($"{errorCount} movies were skipped due to errors.");
@@ -105,6 +163,7 @@ namespace BackendForLab2AI.Data
             catch (Exception ex)
             {
                 Console.WriteLine($"Error seeding database: {ex.Message}");
+                _logger.LogInformation($"Error seeding database: {ex.Message}");
                 throw;
             }
         }

@@ -78,61 +78,63 @@ namespace BackendForLab2AI.Services
             }
         }
 
+        // EmbeddingService.cs
         public async Task<Dictionary<int, List<float>>> GenerateAllMovieEmbeddingsAsync(string model = "nomic-embed-text")
         {
-            var cacheKey = $"{model}_all_movies";
-
-            if (_embeddingCache.ContainsKey(cacheKey))
+            try
             {
-                _logger.LogInformation("✅ Using in-memory cache for model {Model}", model);
-                return _embeddingCache[cacheKey];
-            }
+                var movies = await _context.Movies
+                    .Where(m => m.Embedding == null &&
+                               !string.IsNullOrEmpty(m.Overview) &&
+                               m.Overview.Length > 50)
+                    .Take(1000)
+                    .ToListAsync();
 
-            var cachedEmbeddings = await LoadEmbeddingsFromFileAsync(model);
-            if (cachedEmbeddings.Any())
-            {
-                _logger.LogInformation("✅ Loaded {Count} PRE-COMPUTED embeddings from file for model {Model}",
-                    cachedEmbeddings.Count, model);
-                _embeddingCache[cacheKey] = cachedEmbeddings;
-                return cachedEmbeddings;
-            }
+                _logger.LogInformation("Generating embeddings for {Count} movies", movies.Count);
 
-            _logger.LogWarning("❌ No pre-computed embeddings found for model {Model}. Computing now...", model);
+                var embeddingsDict = new Dictionary<int, List<float>>();
 
-            var movies = await _context.Movies
-                .Where(m => !string.IsNullOrEmpty(m.Overview) && m.Overview.Length > 50)
-                .Take(10000) 
-                .ToListAsync();
-
-            var embeddings = new Dictionary<int, List<float>>();
-
-            _logger.LogInformation("Computing embeddings for {Count} movies using model {Model}...", movies.Count, model);
-
-            foreach (var movie in movies)
-            {
-                try
+                foreach (var movie in movies)
                 {
-                    var text = BuildMovieText(movie);
-                    var embedding = await GetEmbeddingAsync(text, model);
-
-                    if (embedding.Any())
+                    try
                     {
-                        embeddings[movie.Id] = embedding;
-                        _logger.LogInformation("Computed embedding for: {Title}", movie.Title);
+                        var text = BuildMovieText(movie);
+                        var embedding = await GetEmbeddingAsync(text, model);
+
+                        if (embedding.Any())
+                        {
+                            // Сохраняем в БД
+                            movie.Embedding = embedding.ToArray();
+
+                            // И возвращаем в словарь (для обратной совместимости)
+                            embeddingsDict[movie.Id] = embedding;
+
+                            _logger.LogInformation("Generated embedding for: {Title}", movie.Title);
+                        }
+
+                        // Сохраняем каждые 10 фильмов
+                        if (movies.IndexOf(movie) % 10 == 0)
+                        {
+                            await _context.SaveChangesAsync();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error generating embedding for movie {MovieId}", movie.Id);
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error computing embedding for movie {MovieId}", movie.Id);
-                }
+
+                // Финальное сохранение
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("Successfully generated embeddings for {Count} movies", movies.Count);
+
+                return embeddingsDict;
             }
-
-            await SaveEmbeddingsToFileAsync(model, embeddings);
-
-            _embeddingCache[cacheKey] = embeddings;
-
-            _logger.LogInformation("✅ Computed and cached embeddings for {Count} movies", embeddings.Count);
-            return embeddings;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating all movie embeddings");
+                return new Dictionary<int, List<float>>();
+            }
         }
 
         public async Task<bool> SaveEmbeddingsToFileAsync(string model, Dictionary<int, List<float>> embeddings)
@@ -153,7 +155,7 @@ namespace BackendForLab2AI.Services
                 var json = JsonSerializer.Serialize(cacheData, options);
                 await File.WriteAllTextAsync(fileName, json);
 
-                _logger.LogInformation("💾 Saved {Count} embeddings to {FileName}", embeddings.Count, fileName);
+                _logger.LogInformation("Saved {Count} embeddings to {FileName}", embeddings.Count, fileName);
                 return true;
             }
             catch (Exception ex)
@@ -184,7 +186,7 @@ namespace BackendForLab2AI.Services
                     return new Dictionary<int, List<float>>();
                 }
 
-                _logger.LogInformation("📁 Loaded {Count} embeddings from {FileName} (created: {CreatedAt})",
+                _logger.LogInformation("Loaded {Count} embeddings from {FileName} (created: {CreatedAt})",
                     cacheData.MovieCount, fileName, cacheData.CreatedAt);
 
                 return cacheData.Embeddings;
@@ -240,7 +242,7 @@ namespace BackendForLab2AI.Services
 
                     _embeddingCache.Clear();
 
-                    _logger.LogInformation("🗑️ Deleted all embedding caches");
+                    _logger.LogInformation("Deleted all embedding caches");
                     return true;
                 }
                 else
@@ -252,7 +254,7 @@ namespace BackendForLab2AI.Services
                         var cacheKey = $"{model}_all_movies";
                         _embeddingCache.Remove(cacheKey);
 
-                        _logger.LogInformation("🗑️ Deleted embeddings cache for model {Model}", model);
+                        _logger.LogInformation("Deleted embeddings cache for model {Model}", model);
                         return true;
                     }
                 }
@@ -269,45 +271,107 @@ namespace BackendForLab2AI.Services
         public async Task<List<MovieRecommendation>> FindSimilarMoviesAsync(string query, int topK = 10,
             string model = "nomic-embed-text", string distanceMetric = "cosine")
         {
-            var queryEmbedding = await GetEmbeddingAsync(query, model);
-
-            var movieEmbeddings = await GenerateAllMovieEmbeddingsAsync(model);
-
-            var similarities = new List<MovieRecommendation>();
-
-            foreach (var (movieId, movieEmbedding) in movieEmbeddings)
+            try
             {
-                var similarity = CalculateSimilarity(queryEmbedding, movieEmbedding, distanceMetric);
-                var movie = await _context.Movies.FindAsync(movieId);
+                // 1. Генерируем эмбеддинг для запроса
+                var queryEmbedding = await GetEmbeddingAsync(query, model);
+                if (!queryEmbedding.Any())
+                    return new List<MovieRecommendation>();
 
-                if (movie != null)
-                {
-                    similarities.Add(new MovieRecommendation
+                var queryEmbeddingArray = queryEmbedding.ToArray();
+                var embeddingString = "[" + string.Join(",", queryEmbeddingArray) + "]";
+
+                // 2. Получаем фильмы через векторный поиск в БД
+                var moviesWithDistances = await _context.Movies
+                    .FromSqlRaw(@"
+                SELECT *, ""Embedding"" <=> {0} as distance 
+                FROM ""Movies"" 
+                WHERE ""Embedding"" IS NOT NULL 
+                ORDER BY distance 
+                LIMIT {1}",
+                        embeddingString, topK)
+                    .Select(m => new
                     {
-                        Movie = movie,
+                        Movie = m,
+                        Distance = EF.Property<float>(m, "distance")
+                    })
+                    .ToListAsync();
+
+                // 3. ПРАВИЛЬНО вычисляем схожесть используя существующий CalculateSimilarity
+                var recommendations = new List<MovieRecommendation>();
+
+                foreach (var md in moviesWithDistances)
+                {
+                    // Получаем эмбеддинг фильма из БД и конвертируем в List<float>
+                    var movieEmbeddingList = md.Movie.Embedding?.ToList() ?? new List<float>();
+
+                    // Используем существующий CalculateSimilarity
+                    var similarity = CalculateSimilarity(queryEmbedding, movieEmbeddingList, distanceMetric);
+
+                    recommendations.Add(new MovieRecommendation
+                    {
+                        Movie = md.Movie,
                         SimilarityScore = similarity,
                         DistanceMetric = distanceMetric
                     });
                 }
-            }
 
-            return similarities
-                .OrderByDescending(s => s.SimilarityScore)
-                .Take(topK)
-                .ToList();
+                return recommendations;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error finding similar movies using vector DB");
+                return new List<MovieRecommendation>();
+            }
         }
 
+
         public async Task<List<MovieRecommendation>> FindSimilarMoviesByTitleAsync(string movieTitle, int topK = 10,
-            string model = "nomic-embed-text", string distanceMetric = "cosine")
+          string model = "nomic-embed-text", string distanceMetric = "cosine")
         {
-            var movie = await _context.Movies
-                .FirstOrDefaultAsync(m => m.Title != null && m.Title.ToLower().Contains(movieTitle.ToLower()));
+            try
+            {
+                // 1. Находим фильм по названию
+                var movie = await _context.Movies
+                    .FirstOrDefaultAsync(m => m.Title != null &&
+                                           m.Title.ToLower().Contains(movieTitle.ToLower()));
 
-            if (movie == null || string.IsNullOrEmpty(movie.Overview))
+                if (movie == null)
+                    return new List<MovieRecommendation>();
+
+                // 2. Если у фильма есть эмбеддинг в БД - используем его для поиска
+                if (movie.Embedding != null && movie.Embedding.Length > 0)
+                {
+                    var embeddingString = "[" + string.Join(",", movie.Embedding) + "]";
+
+                    return await _context.Movies
+                        .FromSqlRaw(@"
+                            SELECT *, ""Embedding"" <=> {0} as distance 
+                            FROM ""Movies"" 
+                            WHERE Id != {1} AND ""Embedding"" IS NOT NULL 
+                            ORDER BY distance 
+                            LIMIT {2}",
+                            embeddingString, movie.Id, topK)
+                        .Select(m => new MovieRecommendation
+                        {
+                            Movie = m,
+                            SimilarityScore = 1.0 - (double)EF.Property<float>(m, "distance"),
+                            DistanceMetric = distanceMetric,
+                        })
+                        .ToListAsync();
+                }
+                else
+                {
+                    // 3. Если эмбеддинга нет - генерируем из описания фильма
+                    var queryText = BuildMovieText(movie);
+                    return await FindSimilarMoviesAsync(queryText, topK, model, distanceMetric);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error finding similar movies by title using vector DB");
                 return new List<MovieRecommendation>();
-
-            var queryText = BuildMovieText(movie);
-            return await FindSimilarMoviesAsync(queryText, topK, model, distanceMetric);
+            }
         }
 
         public async Task<List<MovieRecommendation>> CompareEmbeddingModelsAsync(string query)

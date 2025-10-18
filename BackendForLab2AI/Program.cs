@@ -18,8 +18,12 @@ builder.Services.AddCors(options =>
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
+//builder.Services.AddDbContext<MovieContext>(options =>
+//    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
 builder.Services.AddDbContext<MovieContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
 
 //// Add HTTP Client for Ollama
 //builder.Services.AddHttpClient("Ollama", client =>
@@ -57,25 +61,6 @@ app.MapGet("/", () => "OK");
 
 app.Run();
 
-
-//async Task InitializeDatabaseAsync(WebApplication app)
-//{
-//    using var scope = app.Services.CreateScope();
-//    var services = scope.ServiceProvider;
-
-//    try
-//    {
-//        var context = services.GetRequiredService<MovieContext>();
-//        await context.InitializeDatabaseAsync();
-//        Console.WriteLine("Database initialized successfully with movie data.");
-//    }
-//    catch (Exception ex)
-//    {
-//        var logger = services.GetRequiredService<ILogger<Program>>();
-//        logger.LogError(ex, "An error occurred while initializing the database.");
-//    }
-//}
-
 async Task InitializeDatabaseAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
@@ -101,7 +86,6 @@ async Task InitializeDatabaseAsync(WebApplication app)
                 await Task.Delay(5000);
             }
         }
-
         await context.InitializeDatabaseAsync();
         Console.WriteLine("Database initialized successfully with movie data.");
     }

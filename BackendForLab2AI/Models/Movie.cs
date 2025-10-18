@@ -58,5 +58,7 @@ namespace BackendForLab2AI.Models
         public double VoteAverage { get; set; }
 
         public int VoteCount { get; set; }
+
+        public float[]? Embedding { get; set; } // Для хранения векторов
     }
 }
