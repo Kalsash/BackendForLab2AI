@@ -4,6 +4,7 @@ using BackendForLab2AI.Models;
 using System.Text.Json;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Pgvector;
 
 namespace BackendForLab2AI.Services
 {
@@ -79,7 +80,7 @@ namespace BackendForLab2AI.Services
         }
 
         // EmbeddingService.cs
-        public async Task<Dictionary<int, List<float>>> GenerateAllMovieEmbeddingsAsync(string model = "nomic-embed-text")
+        public async Task<Dictionary<int, Vector>> GenerateAllMovieEmbeddingsAsync(string model = "nomic-embed-text")
         {
             try
             {
@@ -87,12 +88,12 @@ namespace BackendForLab2AI.Services
                     .Where(m => m.Embedding == null &&
                                !string.IsNullOrEmpty(m.Overview) &&
                                m.Overview.Length > 50)
-                    .Take(1000)
+                    .Take(10000)
                     .ToListAsync();
 
                 _logger.LogInformation("Generating embeddings for {Count} movies", movies.Count);
 
-                var embeddingsDict = new Dictionary<int, List<float>>();
+                var embeddingsDict = new Dictionary<int, Vector>();
 
                 foreach (var movie in movies)
                 {
@@ -103,20 +104,17 @@ namespace BackendForLab2AI.Services
 
                         if (embedding.Any())
                         {
-                            // Сохраняем в БД
-                            movie.Embedding = embedding.ToArray();
+                            // КОНВЕРТИРУЕМ в Vector перед сохранением
+                            movie.Embedding = new Vector(embedding.ToArray());
 
                             // И возвращаем в словарь (для обратной совместимости)
-                            embeddingsDict[movie.Id] = embedding;
+                            embeddingsDict[movie.Id] = new Vector(embedding.ToArray());
 
                             _logger.LogInformation("Generated embedding for: {Title}", movie.Title);
                         }
 
-                        // Сохраняем каждые 10 фильмов
-                        if (movies.IndexOf(movie) % 10 == 0)
-                        {
-                            await _context.SaveChangesAsync();
-                        }
+                        // Сохраняем после каждого фильма
+                        await _context.SaveChangesAsync();
                     }
                     catch (Exception ex)
                     {
@@ -124,16 +122,13 @@ namespace BackendForLab2AI.Services
                     }
                 }
 
-                // Финальное сохранение
-                await _context.SaveChangesAsync();
                 _logger.LogInformation("Successfully generated embeddings for {Count} movies", movies.Count);
-
                 return embeddingsDict;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating all movie embeddings");
-                return new Dictionary<int, List<float>>();
+                return new Dictionary<int, Vector>();
             }
         }
 
@@ -273,50 +268,57 @@ namespace BackendForLab2AI.Services
         {
             try
             {
+                var moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.Embedding != null);
+
+                if (moviesWithEmbeddings <10000)
+                {
+                    _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
+                    await GenerateAllMovieEmbeddingsAsync(model);
+                }
                 // 1. Генерируем эмбеддинг для запроса
                 var queryEmbedding = await GetEmbeddingAsync(query, model);
                 if (!queryEmbedding.Any())
                     return new List<MovieRecommendation>();
 
-                var queryEmbeddingArray = queryEmbedding.ToArray();
-                var embeddingString = "[" + string.Join(",", queryEmbeddingArray) + "]";
+                // 2. Конвертируем в тип Vector
+                var vector = new Vector(queryEmbedding.ToArray());
 
-                // 2. Получаем фильмы через векторный поиск в БД
-                var moviesWithDistances = await _context.Movies
-                    .FromSqlRaw(@"
-                SELECT *, ""Embedding"" <=> {0} as distance 
-                FROM ""Movies"" 
-                WHERE ""Embedding"" IS NOT NULL 
-                ORDER BY distance 
-                LIMIT {1}",
-                        embeddingString, topK)
-                    .Select(m => new
-                    {
-                        Movie = m,
-                        Distance = EF.Property<float>(m, "distance")
-                    })
+                // 3. Выполняем запрос
+                var sql = @"
+            SELECT m.* 
+            FROM ""Movies"" m
+            WHERE m.""Embedding"" IS NOT NULL 
+            ORDER BY m.""Embedding"" <=> {0} 
+            LIMIT {1}";
+
+                var similarMovies = await _context.Movies
+                    .FromSqlRaw(sql, vector, topK)
                     .ToListAsync();
 
-                // 3. ПРАВИЛЬНО вычисляем схожесть используя существующий CalculateSimilarity
+                // 4. Вычисляем схожесть для каждого фильма
                 var recommendations = new List<MovieRecommendation>();
 
-                foreach (var md in moviesWithDistances)
+                foreach (var movie in similarMovies)
                 {
-                    // Получаем эмбеддинг фильма из БД и конвертируем в List<float>
-                    var movieEmbeddingList = md.Movie.Embedding?.ToList() ?? new List<float>();
-
-                    // Используем существующий CalculateSimilarity
-                    var similarity = CalculateSimilarity(queryEmbedding, movieEmbeddingList, distanceMetric);
-
-                    recommendations.Add(new MovieRecommendation
+                    if (movie.Embedding != null)
                     {
-                        Movie = md.Movie,
-                        SimilarityScore = similarity,
-                        DistanceMetric = distanceMetric
-                    });
+                        // Конвертируем Vector обратно в List<float> для расчета схожести
+                        var movieEmbeddingList = movie.Embedding.ToArray().ToList();
+                        var similarity = CalculateSimilarity(queryEmbedding, movieEmbeddingList, distanceMetric);
+
+                        recommendations.Add(new MovieRecommendation
+                        {
+                            Movie = movie,
+                            SimilarityScore = similarity,
+                            DistanceMetric = distanceMetric
+                        });
+                    }
                 }
 
-                return recommendations;
+                return recommendations
+                    .OrderByDescending(r => r.SimilarityScore)
+                    .Take(topK)
+                    .ToList();
             }
             catch (Exception ex)
             {
@@ -340,7 +342,7 @@ namespace BackendForLab2AI.Services
                     return new List<MovieRecommendation>();
 
                 // 2. Если у фильма есть эмбеддинг в БД - используем его для поиска
-                if (movie.Embedding != null && movie.Embedding.Length > 0)
+                if (movie.Embedding != null && movie.Embedding.ToArray().Length > 0)
                 {
                     var embeddingString = "[" + string.Join(",", movie.Embedding) + "]";
 

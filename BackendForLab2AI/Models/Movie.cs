@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations.Schema;
 using System.ComponentModel.DataAnnotations;
-
+using Pgvector;
 namespace BackendForLab2AI.Models
 {
     public class Movie
@@ -59,6 +59,6 @@ namespace BackendForLab2AI.Models
 
         public int VoteCount { get; set; }
 
-        public float[]? Embedding { get; set; } // Для хранения векторов
+        public Vector? Embedding { get; set; } // Для хранения векторов
     }
 }

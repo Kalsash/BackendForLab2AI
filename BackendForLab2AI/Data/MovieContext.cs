@@ -26,13 +26,13 @@ namespace BackendForLab2AI.Data
                 // Удаляем старый индекс если существует
                 await Database.ExecuteSqlRawAsync(@"DROP INDEX IF EXISTS ""IX_Movies_Embedding_Vector""");
 
-                // Создаем новый HNSW индекс
+                // Создаем новый HNSW индекс БЕЗ ef_search
                 await Database.ExecuteSqlRawAsync(@"
-                CREATE INDEX ""IX_Movies_Embedding_Vector"" 
-                ON ""Movies"" 
-                USING hnsw (""Embedding"" vector_cosine_ops)
-                WITH (m = 16, ef_construction = 64, ef_search = 100);
-            ");
+            CREATE INDEX ""IX_Movies_Embedding_Vector"" 
+            ON ""Movies"" 
+            USING hnsw (""Embedding"" vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);
+        ");
 
                 _logger.LogInformation("Vector index created successfully");
             }
@@ -53,19 +53,11 @@ namespace BackendForLab2AI.Data
                 entity.Property(e => e.Title).IsRequired();
                 entity.Property(e => e.OriginalTitle).IsRequired();
                 entity.Property(e => e.ReleaseDate).IsRequired(false);
+                //  entity.Property(e => e.Embedding)
+                //.HasColumnType("real[]"); // Массив float в PostgreSQL
 
-                // Добавляем конфигурацию для векторного поля
-                // VALUE CONVERTER для float[] -> vector
-                //entity.Property(e => e.Embedding)
-                //      .HasColumnType("vector(1536)")
-                //      .HasConversion(
-                //          v => v == null ? null : string.Join(",", v), // float[] -> string
-                //          v => v == null ? null : v.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                //                                  .Select(float.Parse)
-                //                                  .ToArray() // string -> float[]
-                //      );
                 entity.Property(e => e.Embedding)
-              .HasColumnType("real[]"); // Массив float в PostgreSQL
+      .HasColumnType("vector(768)");
             });
         }
 
