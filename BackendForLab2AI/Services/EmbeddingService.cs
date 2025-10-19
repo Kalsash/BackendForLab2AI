@@ -84,6 +84,43 @@ namespace BackendForLab2AI.Services
         {
             try
             {
+                // 1. Сначала пробуем загрузить из кэша
+                var cachedEmbeddings = await LoadEmbeddingsFromFileAsync(model);
+                if (cachedEmbeddings.Any())
+                {
+                    _logger.LogInformation("Loaded {Count} embeddings from cache for model {Model}",
+                        cachedEmbeddings.Count, model);
+
+                    // Получаем ID фильмов из кэша
+                    var cachedMovieIds = cachedEmbeddings.Keys.ToList();
+
+                    // Загружаем фильмы которые есть в кэше но не имеют эмбеддингов в БД
+                    var moviesToUpdate = await _context.Movies
+                        .Where(m => cachedMovieIds.Contains(m.Id) && m.Embedding == null)
+                        .ToListAsync();
+
+                    var vectorDict = new Dictionary<int, Vector>();
+
+                    foreach (var movie in moviesToUpdate)
+                    {
+                        if (cachedEmbeddings.TryGetValue(movie.Id, out var embeddingList) && embeddingList.Any())
+                        {
+                            movie.Embedding = new Vector(embeddingList.ToArray());
+                            vectorDict[movie.Id] = movie.Embedding;
+                        }
+                    }
+
+                    if (moviesToUpdate.Any())
+                    {
+                        await _context.SaveChangesAsync();
+                        _logger.LogInformation("Restored {Count} embeddings from cache to database",
+                            moviesToUpdate.Count);
+                    }
+
+                    return vectorDict;
+                }
+
+                // 2. Если кэша нет - генерируем новые
                 var movies = await _context.Movies
                     .Where(m => m.Embedding == null &&
                                !string.IsNullOrEmpty(m.Overview) &&
@@ -94,6 +131,7 @@ namespace BackendForLab2AI.Services
                 _logger.LogInformation("Generating embeddings for {Count} movies", movies.Count);
 
                 var embeddingsDict = new Dictionary<int, Vector>();
+                var floatEmbeddingsDict = new Dictionary<int, List<float>>(); // Для кэша
 
                 foreach (var movie in movies)
                 {
@@ -104,17 +142,23 @@ namespace BackendForLab2AI.Services
 
                         if (embedding.Any())
                         {
-                            // КОНВЕРТИРУЕМ в Vector перед сохранением
-                            movie.Embedding = new Vector(embedding.ToArray());
+                            // Сохраняем в БД как Vector
+                            var vector = new Vector(embedding.ToArray());
+                            movie.Embedding = vector;
+                            embeddingsDict[movie.Id] = vector;
 
-                            // И возвращаем в словарь (для обратной совместимости)
-                            embeddingsDict[movie.Id] = new Vector(embedding.ToArray());
+                            // Сохраняем для кэша как List<float>
+                            floatEmbeddingsDict[movie.Id] = embedding;
 
                             _logger.LogInformation("Generated embedding for: {Title}", movie.Title);
                         }
 
-                        // Сохраняем после каждого фильма
-                        await _context.SaveChangesAsync();
+                        // Сохраняем каждые 50 фильмов (для производительности)
+                        if (movies.IndexOf(movie) % 50 == 0)
+                        {
+                            await _context.SaveChangesAsync();
+                            _logger.LogInformation("Saved batch of embeddings to database");
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -122,7 +166,17 @@ namespace BackendForLab2AI.Services
                     }
                 }
 
-                _logger.LogInformation("Successfully generated embeddings for {Count} movies", movies.Count);
+                // Финальное сохранение
+                await _context.SaveChangesAsync();
+
+                // 3. Сохраняем в кэш
+                if (floatEmbeddingsDict.Any())
+                {
+                    await SaveEmbeddingsToFileAsync(model, floatEmbeddingsDict);
+                    _logger.LogInformation("Saved {Count} embeddings to cache", floatEmbeddingsDict.Count);
+                }
+
+                _logger.LogInformation("Successfully generated embeddings for {Count} movies", embeddingsDict.Count);
                 return embeddingsDict;
             }
             catch (Exception ex)
@@ -270,11 +324,12 @@ namespace BackendForLab2AI.Services
             {
                 var moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.Embedding != null);
 
-                if (moviesWithEmbeddings <10000)
-                {
-                    _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
-                    await GenerateAllMovieEmbeddingsAsync(model);
-                }
+                //if (moviesWithEmbeddings <10000)
+                //{
+                //    _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
+                //    await GenerateAllMovieEmbeddingsAsync(model);
+                //}
+                await GenerateAllMovieEmbeddingsAsync(model);
                 // 1. Генерируем эмбеддинг для запроса
                 var queryEmbedding = await GetEmbeddingAsync(query, model);
                 if (!queryEmbedding.Any())

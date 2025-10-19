@@ -31,18 +31,15 @@ builder.Services.AddDbContext<MovieContext>(options =>
     )
 );
 
-//// Add HTTP Client for Ollama
+
+var ollamaBaseUrl = Environment.GetEnvironmentVariable("OLLAMA_BASE_URL")
+    ?? "http://localhost:11434/";
+
 builder.Services.AddHttpClient("Ollama", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:11434/");
+    client.BaseAddress = new Uri(ollamaBaseUrl);
     client.Timeout = TimeSpan.FromMinutes(5);
 });
-// Add HTTP Client for Ollama
-//builder.Services.AddHttpClient("Ollama", client =>
-//{
-//    client.BaseAddress = new Uri("http://host.docker.internal:11434/");
-//    client.Timeout = TimeSpan.FromMinutes(5);
-//});
 
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();

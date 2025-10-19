@@ -12,6 +12,8 @@ services:
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
       - ASPNETCORE_URLS=http://+:8080
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434/ 
+      - ConnectionStrings__DefaultConnection=Host=db;Database=MoviesDB;Username=postgres;Password=1234;Port=5432
     depends_on:
       - db
     volumes:
@@ -20,17 +22,17 @@ services:
     restart: unless-stopped
 
   db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: pgvector/pgvector:pg16  
     environment:
-      - ACCEPT_EULA=Y
-      - SA_PASSWORD=Password123
-      - MSSQL_PID=Express
+      - POSTGRES_DB=MoviesDB
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=1234
     ports:
-      - "1433:1433"
+      - "5432:5432"
     volumes:
-      - sqlserver_data:/var/opt/mssql
+      - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
 
 volumes:
-  sqlserver_data:
-  embeddings_cache:  
+  postgres_data:  
+  embeddings_cache:
