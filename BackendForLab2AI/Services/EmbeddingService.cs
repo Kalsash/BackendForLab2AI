@@ -390,14 +390,20 @@ namespace BackendForLab2AI.Services
             {
                 var embeddingProperty = GetEmbeddingPropertyName(model);
 
-                var moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.Embedding != null);
+                var moviesWithEmbeddings = 0;
+                if (model == "nomic-embed-text")
+                    moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.Embedding != null);
+                if (model == "all-minilm")
+                    moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.EmbeddingAllMiniLM != null);
+                if (model == "bge-m3")
+                    moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.EmbeddingBgeM3 != null);
 
-                //if (moviesWithEmbeddings < 10000)
-                //{
-                //    _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
-                //    await GenerateAllMovieEmbeddingsAsync(model);
-                //}
-                await GenerateAllMovieEmbeddingsAsync(model);
+                if (moviesWithEmbeddings < 10000)
+                {
+                    _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
+                    await GenerateAllMovieEmbeddingsAsync(model);
+                }
+
                 // 1. Генерируем эмбеддинг для запроса
                 var queryEmbedding = await GetEmbeddingAsync(query, model);
                 if (!queryEmbedding.Any())
