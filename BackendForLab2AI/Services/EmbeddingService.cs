@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Pgvector;
+using Microsoft.Extensions.Logging;
 
 namespace BackendForLab2AI.Services
 {
@@ -79,7 +80,44 @@ namespace BackendForLab2AI.Services
             }
         }
 
-        // EmbeddingService.cs
+        private string GetEmbeddingPropertyName(string model)
+        {
+            return model.ToLower() switch
+            {
+                "all-minilm" => "EmbeddingAllMiniLM",
+                "bge-m3" => "EmbeddingBgeM3",
+                _ => "Embedding" // по умолчанию для nomic-embed-text
+            };
+        }
+
+        private Vector? GetEmbeddingByModel(Movie movie, string model)
+        {
+            return model.ToLower() switch
+            {
+                "all-minilm" => movie.EmbeddingAllMiniLM,
+                "bge-m3" => movie.EmbeddingBgeM3,
+                _ => movie.Embedding
+            };
+        }
+
+        private void SetEmbeddingByModel(Movie movie, string model, Vector? vector)
+        {
+            switch (model.ToLower())
+            {
+                case "all-minilm":
+                    movie.EmbeddingAllMiniLM = vector;
+                    break;
+                case "bge-m3":
+                    movie.EmbeddingBgeM3 = vector;
+                    break;
+                default:
+                    movie.Embedding = vector;
+                    break;
+            }
+        }
+
+
+
         public async Task<Dictionary<int, Vector>> GenerateAllMovieEmbeddingsAsync(string model = "nomic-embed-text")
         {
             try
@@ -95,9 +133,18 @@ namespace BackendForLab2AI.Services
                     var cachedMovieIds = cachedEmbeddings.Keys.ToList();
 
                     // Загружаем фильмы которые есть в кэше но не имеют эмбеддингов в БД
-                    var moviesToUpdate = await _context.Movies
-                        .Where(m => cachedMovieIds.Contains(m.Id) && m.Embedding == null)
-                        .ToListAsync();
+                    // Используем прямой доступ к свойствам вместо пользовательского метода
+                    IQueryable<Movie> moviesQuery = model.ToLower() switch
+                    {
+                        "all-minilm" => _context.Movies
+                            .Where(m => cachedMovieIds.Contains(m.Id) && m.EmbeddingAllMiniLM == null),
+                        "bge-m3" => _context.Movies
+                            .Where(m => cachedMovieIds.Contains(m.Id) && m.EmbeddingBgeM3 == null),
+                        _ => _context.Movies
+                            .Where(m => cachedMovieIds.Contains(m.Id) && m.Embedding == null)
+                    };
+
+                    var moviesToUpdate = await moviesQuery.ToListAsync();
 
                     var vectorDict = new Dictionary<int, Vector>();
 
@@ -105,30 +152,48 @@ namespace BackendForLab2AI.Services
                     {
                         if (cachedEmbeddings.TryGetValue(movie.Id, out var embeddingList) && embeddingList.Any())
                         {
-                            movie.Embedding = new Vector(embeddingList.ToArray());
-                            vectorDict[movie.Id] = movie.Embedding;
+                            var vector = new Vector(embeddingList.ToArray());
+                            SetEmbeddingByModel(movie, model, vector);
+                            vectorDict[movie.Id] = vector;
                         }
                     }
 
                     if (moviesToUpdate.Any())
                     {
                         await _context.SaveChangesAsync();
-                        _logger.LogInformation("Restored {Count} embeddings from cache to database",
-                            moviesToUpdate.Count);
+                        _logger.LogInformation("Restored {Count} embeddings from cache to database for model {Model}",
+                            moviesToUpdate.Count, model);
                     }
 
                     return vectorDict;
                 }
 
+
+                _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
+
                 // 2. Если кэша нет - генерируем новые
-                var movies = await _context.Movies
-                    .Where(m => m.Embedding == null &&
-                               !string.IsNullOrEmpty(m.Overview) &&
-                               m.Overview.Length > 50)
+                // Аналогично исправляем запрос для фильмов без эмбеддингов
+                IQueryable<Movie> moviesWithoutEmbeddingsQuery = model.ToLower() switch
+                {
+                    "all-minilm" => _context.Movies
+                        .Where(m => m.EmbeddingAllMiniLM == null &&
+                                   !string.IsNullOrEmpty(m.Overview) &&
+                                   m.Overview.Length > 50),
+                    "bge-m3" => _context.Movies
+                        .Where(m => m.EmbeddingBgeM3 == null &&
+                                   !string.IsNullOrEmpty(m.Overview) &&
+                                   m.Overview.Length > 50),
+                    _ => _context.Movies
+                        .Where(m => m.Embedding == null &&
+                                   !string.IsNullOrEmpty(m.Overview) &&
+                                   m.Overview.Length > 50)
+                };
+
+                var movies = await moviesWithoutEmbeddingsQuery
                     .Take(10000)
                     .ToListAsync();
 
-                _logger.LogInformation("Generating embeddings for {Count} movies", movies.Count);
+                _logger.LogInformation("Generating {Model} embeddings for {Count} movies", model, movies.Count);
 
                 var embeddingsDict = new Dictionary<int, Vector>();
                 var floatEmbeddingsDict = new Dictionary<int, List<float>>(); // Для кэша
@@ -144,25 +209,25 @@ namespace BackendForLab2AI.Services
                         {
                             // Сохраняем в БД как Vector
                             var vector = new Vector(embedding.ToArray());
-                            movie.Embedding = vector;
+                            SetEmbeddingByModel(movie, model, vector);
                             embeddingsDict[movie.Id] = vector;
 
                             // Сохраняем для кэша как List<float>
                             floatEmbeddingsDict[movie.Id] = embedding;
 
-                            _logger.LogInformation("Generated embedding for: {Title}", movie.Title);
+                            _logger.LogInformation("Generated {Model} embedding for: {Title}", model, movie.Title);
                         }
 
                         // Сохраняем каждые 50 фильмов (для производительности)
                         if (movies.IndexOf(movie) % 50 == 0)
                         {
                             await _context.SaveChangesAsync();
-                            _logger.LogInformation("Saved batch of embeddings to database");
+                            _logger.LogInformation("Saved batch of {Model} embeddings to database", model);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Error generating embedding for movie {MovieId}", movie.Id);
+                        _logger.LogError(ex, "Error generating {Model} embedding for movie {MovieId}", model, movie.Id);
                     }
                 }
 
@@ -173,15 +238,16 @@ namespace BackendForLab2AI.Services
                 if (floatEmbeddingsDict.Any())
                 {
                     await SaveEmbeddingsToFileAsync(model, floatEmbeddingsDict);
-                    _logger.LogInformation("Saved {Count} embeddings to cache", floatEmbeddingsDict.Count);
+                    _logger.LogInformation("Saved {Count} {Model} embeddings to cache", floatEmbeddingsDict.Count, model);
                 }
 
-                _logger.LogInformation("Successfully generated embeddings for {Count} movies", embeddingsDict.Count);
+                _logger.LogInformation("Successfully generated {Model} embeddings for {Count} movies",
+                    model, embeddingsDict.Count);
                 return embeddingsDict;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error generating all movie embeddings");
+                _logger.LogError(ex, "Error generating movie embeddings for model {Model}", model);
                 return new Dictionary<int, Vector>();
             }
         }
@@ -322,9 +388,11 @@ namespace BackendForLab2AI.Services
         {
             try
             {
+                var embeddingProperty = GetEmbeddingPropertyName(model);
+
                 var moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.Embedding != null);
 
-                //if (moviesWithEmbeddings <10000)
+                //if (moviesWithEmbeddings < 10000)
                 //{
                 //    _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
                 //    await GenerateAllMovieEmbeddingsAsync(model);
@@ -339,12 +407,12 @@ namespace BackendForLab2AI.Services
                 var vector = new Vector(queryEmbedding.ToArray());
 
                 // 3. Выполняем запрос
-                var sql = @"
-            SELECT m.* 
-            FROM ""Movies"" m
-            WHERE m.""Embedding"" IS NOT NULL 
-            ORDER BY m.""Embedding"" <=> {0} 
-            LIMIT {1}";
+                var sql = $@"
+                SELECT m.* 
+                FROM ""Movies"" m
+                WHERE m.""{embeddingProperty}"" IS NOT NULL 
+                ORDER BY m.""{embeddingProperty}"" <=> {{0}} 
+                LIMIT {{1}}";
 
                 var similarMovies = await _context.Movies
                     .FromSqlRaw(sql, vector, topK)
@@ -355,17 +423,18 @@ namespace BackendForLab2AI.Services
 
                 foreach (var movie in similarMovies)
                 {
-                    if (movie.Embedding != null)
+                    var movieEmbedding = GetEmbeddingByModel(movie, model);
+                    if (movieEmbedding != null)
                     {
-                        // Конвертируем Vector обратно в List<float> для расчета схожести
-                        var movieEmbeddingList = movie.Embedding.ToArray().ToList();
+                        var movieEmbeddingList = movieEmbedding.ToArray().ToList();
                         var similarity = CalculateSimilarity(queryEmbedding, movieEmbeddingList, distanceMetric);
 
                         recommendations.Add(new MovieRecommendation
                         {
                             Movie = movie,
                             SimilarityScore = similarity,
-                            DistanceMetric = distanceMetric
+                            DistanceMetric = distanceMetric,
+                            EmbeddingModel = model
                         });
                     }
                 }

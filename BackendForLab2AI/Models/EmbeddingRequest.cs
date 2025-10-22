@@ -21,6 +21,9 @@ namespace BackendForLab2AI.Models
         public Movie Movie { get; set; } = null!;
         public double SimilarityScore { get; set; }
         public string DistanceMetric { get; set; } = "";
+
+        public string EmbeddingModel { get; set; } = "nomic-embed-text";
+
     }
 
     public class RecommendationRequest

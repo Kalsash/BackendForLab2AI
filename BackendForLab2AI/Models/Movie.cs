@@ -59,6 +59,9 @@ namespace BackendForLab2AI.Models
 
         public int VoteCount { get; set; }
 
-        public Vector? Embedding { get; set; } // Для хранения векторов
+        // Эмбеддинги для разных моделей
+        public Vector? Embedding { get; set; }        // Для nomic-embed-text
+        public Vector? EmbeddingAllMiniLM { get; set; } // Для all-minilm
+        public Vector? EmbeddingBgeM3 { get; set; }   // Для bge-m3
     }
 }

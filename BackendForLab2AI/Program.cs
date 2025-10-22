@@ -1,6 +1,7 @@
 using BackendForLab2AI.Data;
 using BackendForLab2AI.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 
 var builder = WebApplication.CreateBuilder(args);
@@ -68,33 +69,33 @@ async Task InitializeDatabaseAsync(WebApplication app)
 {
     using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
 
     try
     {
         var context = services.GetRequiredService<MovieContext>();
 
         var retries = 10;
-        while (retries > 0)
-        {
-            try
-            {
-                Console.WriteLine("Attempting to connect to database...");
-                await context.Database.CanConnectAsync();
-                break;
-            }
-            catch (Exception)
-            {
-                retries--;
-                Console.WriteLine($"Database not ready yet. Retries left: {retries}");
-                await Task.Delay(5000);
-            }
-        }
+        //while (retries > 0)
+        //{
+        //    try
+        //    {
+        //        logger.LogInformation("Attempting to connect to database...");
+        //        await context.Database.CanConnectAsync();
+        //        break;
+        //    }
+        //    catch (Exception)
+        //    {
+        //        retries--;
+        //        logger.LogInformation($"Database not ready yet. Retries left: {retries}");
+        //        await Task.Delay(5000);
+        //    }
+        //}
         await context.InitializeDatabaseAsync();
-        Console.WriteLine("Database initialized successfully with movie data.");
+        logger.LogInformation("Database initialized successfully with movie data.");
     }
     catch (Exception ex)
     {
-        var logger = services.GetRequiredService<ILogger<Program>>();
         logger.LogError(ex, "An error occurred while initializing the database.");
     }
 }

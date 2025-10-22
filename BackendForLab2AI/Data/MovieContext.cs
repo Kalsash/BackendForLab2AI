@@ -43,6 +43,43 @@ namespace BackendForLab2AI.Data
             }
         }
 
+        public async Task CreateAllVectorIndexesAsync()
+        {
+            try
+            {
+                // Удаляем старые индексы если существуют
+                await Database.ExecuteSqlRawAsync(@"DROP INDEX IF EXISTS ""IX_Movies_Embedding_Vector""");
+                await Database.ExecuteSqlRawAsync(@"DROP INDEX IF EXISTS ""IX_Movies_EmbeddingAllMiniLM_Vector""");
+                await Database.ExecuteSqlRawAsync(@"DROP INDEX IF EXISTS ""IX_Movies_EmbeddingBgeM3_Vector""");
+
+                // Создаем новые HNSW индексы для каждого типа эмбеддингов
+                await Database.ExecuteSqlRawAsync(@"
+            CREATE INDEX ""IX_Movies_Embedding_Vector"" 
+            ON ""Movies"" 
+            USING hnsw (""Embedding"" vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);");
+
+                await Database.ExecuteSqlRawAsync(@"
+            CREATE INDEX ""IX_Movies_EmbeddingAllMiniLM_Vector"" 
+            ON ""Movies"" 
+            USING hnsw (""EmbeddingAllMiniLM"" vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);");
+
+                await Database.ExecuteSqlRawAsync(@"
+            CREATE INDEX ""IX_Movies_EmbeddingBgeM3_Vector"" 
+            ON ""Movies"" 
+            USING hnsw (""EmbeddingBgeM3"" vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);");
+
+                _logger.LogInformation("All vector indexes created successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create vector indexes");
+                throw;
+            }
+        }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -53,11 +90,17 @@ namespace BackendForLab2AI.Data
                 entity.Property(e => e.Title).IsRequired();
                 entity.Property(e => e.OriginalTitle).IsRequired();
                 entity.Property(e => e.ReleaseDate).IsRequired(false);
-                //  entity.Property(e => e.Embedding)
-                //.HasColumnType("real[]"); // Массив float в PostgreSQL
 
+
+                // Конфигурация полей эмбеддингов
                 entity.Property(e => e.Embedding)
-      .HasColumnType("vector(768)");
+                    .HasColumnType("vector(768)");
+
+                entity.Property(e => e.EmbeddingAllMiniLM)
+                    .HasColumnType("vector(384)"); // all-minilm обычно 384-мерный
+
+                entity.Property(e => e.EmbeddingBgeM3)
+                    .HasColumnType("vector(1024)"); // bge-m3 обычно 1024-мерный
             });
         }
 
@@ -76,10 +119,15 @@ namespace BackendForLab2AI.Data
 
             await Database.EnsureCreatedAsync();
 
+            await Database.ExecuteSqlRawAsync(@"ALTER SEQUENCE ""Movies_Id_seq"" RESTART WITH 1;");
+
             if (!Movies.Any())
             {
+                _logger.LogInformation("Starting Seed");
                 await SeedMoviesFromJsonAsync();
-                await CreateVectorIndexAsync();
+
+                //await CreateVectorIndexAsync();
+                await CreateAllVectorIndexesAsync();
             }
 
           
@@ -134,7 +182,7 @@ namespace BackendForLab2AI.Data
                         catch (Exception ex)
                         {
                             errorCount++;
-                            Console.WriteLine($"Error processing movie at index {i}: {ex.Message}");
+                            _logger.LogInformation($"Error processing movie at index {i}: {ex.Message}");
                         }
                     }
 
@@ -143,18 +191,16 @@ namespace BackendForLab2AI.Data
                         await Movies.AddRangeAsync(movies);
                         await SaveChangesAsync();
 
-                        Console.WriteLine($"Successfully seeded {successCount} movies to database.");
                         _logger.LogInformation($"Successfully seeded {successCount} movies to database.");
                         if (errorCount > 0)
                         {
-                            Console.WriteLine($"{errorCount} movies were skipped due to errors.");
+                            _logger.LogInformation($"{errorCount} movies were skipped due to errors.");
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error seeding database: {ex.Message}");
                 _logger.LogInformation($"Error seeding database: {ex.Message}");
                 throw;
             }
