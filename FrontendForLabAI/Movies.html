@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Movie Database & Recommendations</title>
+    <title>AI Movie Assistant & Recommendations</title>
     <style>
         * {
             margin: 0;
@@ -81,7 +81,8 @@
         }
 
         input,
-        select {
+        select,
+        textarea {
             width: 100%;
             padding: 12px 15px;
             border: none;
@@ -89,10 +90,17 @@
             background: rgba(255, 255, 255, 0.9);
             font-size: 16px;
             transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
         }
 
         input:focus,
-        select:focus {
+        select:focus,
+        textarea:focus {
             outline: none;
             background: white;
             box-shadow: 0 0 0 3px rgba(254, 202, 87, 0.3);
@@ -144,6 +152,25 @@
             background: rgba(255, 255, 255, 0.12);
         }
 
+        .chat-message {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .user-message {
+            border-left-color: #4ecdc4;
+            background: rgba(78, 205, 196, 0.1);
+        }
+
+        .assistant-message {
+            border-left-color: #feca57;
+            background: rgba(254, 202, 87, 0.1);
+        }
+
         @keyframes fadeIn {
             from {
                 opacity: 0;
@@ -158,7 +185,7 @@
 
         .movie-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: flex-start;
             margin-bottom: 20px;
             flex-wrap: wrap;
@@ -279,6 +306,7 @@
             display: flex;
             gap: 10px;
             margin-bottom: 20px;
+            flex-wrap: wrap;
         }
 
         .tab-button {
@@ -311,6 +339,60 @@
             margin-bottom: 20px;
         }
 
+        .chat-container {
+            max-height: 500px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .chat-input {
+            flex: 1;
+        }
+
+        .conversation-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .conversation-id {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: #b8b8b8;
+        }
+
+        .similarity-score {
+            background: rgba(78, 205, 196, 0.2);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #4ecdc4;
+        }
+
+        .clarification-questions {
+            background: rgba(254, 202, 87, 0.1);
+            border: 1px solid #feca57;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .question-item {
+            margin: 8px 0;
+            color: #feca57;
+        }
+
         @media (max-width: 768px) {
             .search-form {
                 flex-direction: column;
@@ -337,6 +419,14 @@
             .recommendations-grid {
                 grid-template-columns: 1fr;
             }
+
+            .chat-input-container {
+                flex-direction: column;
+            }
+
+            .tab-buttons {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -344,13 +434,41 @@
 <body>
     <div class="container">
         <header>
-            <h1>🎬 Movie Database & AI Recommendations</h1>
-            <p class="subtitle">Explore movies and get intelligent recommendations</p>
+            <h1>🎬 AI Movie Assistant</h1>
+            <p class="subtitle">Chat with AI to get personalized movie recommendations</p>
         </header>
 
-        <!-- Search Section -->
+        <!-- AI Assistant Chat Section -->
         <section class="section">
-            <h2 class="section-title">🔍 Search Movies</h2>
+            <h2 class="section-title">🤖 AI Movie Assistant</h2>
+
+            <div class="conversation-controls">
+                <button type="button" onclick="startNewConversation()">🔄 New Conversation</button>
+                <div class="conversation-id" id="conversationId">Starting new conversation...</div>
+            </div>
+
+            <div class="chat-container" id="chatContainer">
+                <div class="chat-message assistant-message">
+                    <strong>🤖 Assistant:</strong> Hello! I'm your movie recommendation assistant. Tell me what kind of
+                    movies you like, and I'll help you find something great to watch! You can mention genres, moods,
+                    favorite films, or anything else that comes to mind.
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <div class="input-group chat-input">
+                    <label for="userMessage">Your Message:</label>
+                    <textarea id="userMessage"
+                        placeholder="Tell me about your movie preferences... (e.g., 'I like sci-fi movies with good action and interesting stories')"
+                        rows="3"></textarea>
+                </div>
+                <button type="button" onclick="sendMessage()">Send</button>
+            </div>
+        </section>
+
+        <!-- Traditional Search Section -->
+        <section class="section">
+            <h2 class="section-title">🔍 Traditional Search</h2>
             <div class="search-form">
                 <div class="input-group">
                     <label for="movieId">Search by Movie ID:</label>
@@ -366,14 +484,13 @@
 
         <!-- Recommendations Section -->
         <section class="section">
-            <h2 class="section-title">🤖 AI Movie Recommendations</h2>
+            <h2 class="section-title">🎯 Direct Recommendations</h2>
 
             <div class="tab-buttons">
                 <button class="tab-button active" onclick="switchTab('byDescription')">By Description</button>
                 <button class="tab-button" onclick="switchTab('byMovieTitle')">By Movie Title</button>
             </div>
 
-            <!-- AI Model and Distance Metric Selection -->
             <div class="model-options">
                 <div class="input-group">
                     <label for="embeddingModel">AI Model:</label>
@@ -435,7 +552,7 @@
 
         <!-- Loading and Error Sections -->
         <div id="loading" class="loading hidden">
-            <p>Loading movie data...</p>
+            <p>🤔 Thinking...</p>
         </div>
 
         <div id="error" class="error hidden">
@@ -467,13 +584,100 @@
     <script>
         const API_BASE_URLS = [
             'http://localhost:8080/api',
-            'http://localhost:5000/api',
-            'https://localhost:5001/api',
             'https://localhost:44372/api'
         ];
 
         let currentApiBase = API_BASE_URLS[0];
+        let currentConversationId = null;
 
+        // Chat functionality
+        async function sendMessage() {
+            const userMessage = document.getElementById('userMessage').value.trim();
+            if (!userMessage) return;
+
+            hideAllSections();
+            showLoading();
+            addMessageToChat('user', userMessage);
+            document.getElementById('userMessage').value = '';
+
+            try {
+                const response = await fetch(`${currentApiBase}/assistant/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        Message: userMessage,
+                        ConversationId: currentConversationId,
+                        ResetConversation: false
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const assistantResponse = await response.json();
+                currentConversationId = assistantResponse.conversationId;
+
+                // Update conversation ID display
+                document.getElementById('conversationId').textContent = `Conversation: ${currentConversationId}`;
+
+                // Add assistant response to chat
+                addMessageToChat('assistant', assistantResponse.response, assistantResponse);
+
+            } catch (error) {
+                console.error('Chat error:', error);
+                addMessageToChat('assistant', 'Sorry, I encountered an error. Please try again.');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function addMessageToChat(role, content, assistantResponse = null) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}-message`;
+
+            let messageContent = `<strong>${role === 'user' ? '👤 You' : '🤖 Assistant'}:</strong> ${escapeHtml(content)}`;
+
+            // Add recommendations if available
+            if (assistantResponse && assistantResponse.recommendedMovies && assistantResponse.recommendedMovies.length > 0) {
+                messageContent += `<div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1);">`;
+                messageContent += `<strong>🎬 Recommended Movies:</strong><br>`;
+                assistantResponse.recommendedMovies.forEach(movie => {
+                    messageContent += `• <em>${escapeHtml(movie.title)}</em><br>`;
+                });
+                messageContent += `</div>`;
+            }
+
+            // Add clarification questions if needed
+            if (assistantResponse && assistantResponse.needsClarification && assistantResponse.clarificationQuestions.length > 0) {
+                messageContent += `<div class="clarification-questions" style="margin-top: 15px;">`;
+                messageContent += `<strong>💡 To help me better:</strong><br>`;
+                assistantResponse.clarificationQuestions.forEach(question => {
+                    messageContent += `<div class="question-item">${escapeHtml(question)}</div>`;
+                });
+                messageContent += `</div>`;
+            }
+
+            messageDiv.innerHTML = messageContent;
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function startNewConversation() {
+            currentConversationId = null;
+            document.getElementById('chatContainer').innerHTML = `
+                <div class="chat-message assistant-message">
+                    <strong>🤖 Assistant:</strong> Hello! I'm your movie recommendation assistant. Tell me what kind of movies you like, and I'll help you find something great to watch! You can mention genres, moods, favorite films, or anything else that comes to mind.
+                </div>
+            `;
+            document.getElementById('conversationId').textContent = 'Starting new conversation...';
+        }
+
+        // Existing functions (keep all your existing search and recommendation functions)
         function switchTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
@@ -608,45 +812,38 @@
                     </div>
                     
                     <div class="movie-details">
-                        ${movie.year ? `
-                            <div class="detail-item">
-                                <div class="detail-label">Release Year</div>
-                                <div class="detail-value">${movie.year}</div>
-                            </div>
-                        ` : ''}
-                        
-                        ${movie.director ? `
-                            <div class="detail-item">
-                                <div class="detail-label">Director</div>
-                                <div class="detail-value">${escapeHtml(movie.director)}</div>
-                            </div>
-                        ` : ''}
-                        
-                        ${movie.genre ? `
-                            <div class="detail-item">
-                                <div class="detail-label">Genre</div>
-                                <div class="detail-value">${escapeHtml(movie.genre)}</div>
-                            </div>
-                        ` : ''}
-                        
-                        ${movie.duration ? `
-                            <div class="detail-item">
-                                <div class="detail-label">Duration</div>
-                                <div class="detail-value">${movie.duration} minutes</div>
-                            </div>
-                        ` : ''}
-                        
-                        ${movie.rating ? `
-                            <div class="detail-item">
-                                <div class="detail-label">Rating</div>
-                                <div class="detail-value">${movie.rating}/10</div>
-                            </div>
-                        ` : ''}
-                        
                         ${movie.releaseDate ? `
                             <div class="detail-item">
                                 <div class="detail-label">Release Date</div>
                                 <div class="detail-value">${formatDate(movie.releaseDate)}</div>
+                            </div>
+                        ` : ''}
+                        
+                        ${movie.genres ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Genres</div>
+                                <div class="detail-value">${escapeHtml(movie.genres)}</div>
+                            </div>
+                        ` : ''}
+                        
+                        ${movie.runtime ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Runtime</div>
+                                <div class="detail-value">${movie.runtime} minutes</div>
+                            </div>
+                        ` : ''}
+                        
+                        ${movie.voteAverage ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Rating</div>
+                                <div class="detail-value">${movie.voteAverage}/10</div>
+                            </div>
+                        ` : ''}
+                        
+                        ${movie.originalLanguage ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Original Language</div>
+                                <div class="detail-value">${movie.originalLanguage}</div>
                             </div>
                         ` : ''}
                         
@@ -798,18 +995,23 @@
                      </div>`;
 
             recommendations.forEach(rec => {
+                const similarityScore = rec.similarityScore ?
+                    `<span class="similarity-score">${(rec.similarityScore * 100).toFixed(1)}% match</span>` : '';
+
                 html += `
                     <div class="recommendation-card">
                         <div class="recommendation-header">
                             <h3 class="recommendation-title">${escapeHtml(rec.movie.title || 'Unknown Title')}</h3>
+                            ${similarityScore}
                         </div>
                         ${rec.movie.overview ? `
                             <div class="recommendation-overview">${escapeHtml(rec.movie.overview)}</div>
                         ` : ''}
                         <div class="recommendation-details">
-                            ${rec.movie.genre ? `<span>🎭 ${escapeHtml(rec.movie.genre)}</span>` : ''}
-                            ${rec.movie.year ? `<span>📅 ${rec.movie.year}</span>` : ''}
-                            ${rec.movie.rating ? `<span>⭐ ${rec.movie.rating}/10</span>` : ''}
+                            ${rec.movie.genres ? `<span>🎭 ${escapeHtml(rec.movie.genres)}</span>` : ''}
+                            ${rec.movie.releaseDate ? `<span>📅 ${new Date(rec.movie.releaseDate).getFullYear()}</span>` : ''}
+                            ${rec.movie.voteAverage ? `<span>⭐ ${rec.movie.voteAverage}/10</span>` : ''}
+                            ${rec.movie.runtime ? `<span>⏱️ ${rec.movie.runtime}min</span>` : ''}
                         </div>
                     </div>
                 `;
@@ -838,13 +1040,6 @@
         function showError(message) {
             document.getElementById('errorMessage').textContent = message;
             document.getElementById('error').classList.remove('hidden');
-        }
-
-        function showMessage(message, type = 'info') {
-            const errorDiv = document.getElementById('error');
-            errorDiv.className = type === 'success' ? 'warning' : 'error';
-            document.getElementById('errorMessage').textContent = message;
-            errorDiv.classList.remove('hidden');
         }
 
         function showNoResults() {
@@ -893,6 +1088,13 @@
         }
 
         // Event listeners
+        document.getElementById('userMessage').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
         document.getElementById('movieId').addEventListener('keypress', function (e) {
             if (e.key === 'Enter') searchMovie();
         });
