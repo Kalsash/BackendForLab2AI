@@ -8,8 +8,6 @@ public interface IEmbeddingService
     Task<Dictionary<int, Vector>> GenerateAllMovieEmbeddingsAsync(string model = "nomic-embed-text");
     Task<List<MovieRecommendation>> FindSimilarMoviesAsync(string query, int topK = 10, string model = "nomic-embed-text", string distanceMetric = "cosine");
     Task<List<MovieRecommendation>> FindSimilarMoviesByTitleAsync(string movieTitle, int topK = 10, string model = "nomic-embed-text", string distanceMetric = "cosine");
-    Task<List<MovieRecommendation>> CompareEmbeddingModelsAsync(string query);
-    Task<List<MovieRecommendation>> CompareDistanceMetricsAsync(string query, string model = "nomic-embed-text");
 
     Task<bool> SaveEmbeddingsToFileAsync(string model, Dictionary<int, List<float>> embeddings);
     Task<Dictionary<int, List<float>>> LoadEmbeddingsFromFileAsync(string model);

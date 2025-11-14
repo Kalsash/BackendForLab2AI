@@ -505,41 +505,6 @@ namespace BackendForLab2AI.Services
                 return new List<MovieRecommendation>();
             }
         }
-
-        public async Task<List<MovieRecommendation>> CompareEmbeddingModelsAsync(string query)
-        {
-            var models = new[] { "nomic-embed-text", "all-minilm", "bge-m3" };
-            var allResults = new List<MovieRecommendation>();
-
-            foreach (var model in models)
-            {
-                var results = await FindSimilarMoviesAsync(query, 5, model, "cosine");
-                allResults.AddRange(results);
-            }
-
-            return allResults
-                .OrderByDescending(r => r.SimilarityScore)
-                .Take(10)
-                .ToList();
-        }
-
-        public async Task<List<MovieRecommendation>> CompareDistanceMetricsAsync(string query, string model = "nomic-embed-text")
-        {
-            var metrics = new[] { "cosine", "euclidean", "manhattan", "dot" };
-            var allResults = new List<MovieRecommendation>();
-
-            foreach (var metric in metrics)
-            {
-                var results = await FindSimilarMoviesAsync(query, 5, model, metric);
-                allResults.AddRange(results);
-            }
-
-            return allResults
-                .OrderByDescending(r => r.SimilarityScore)
-                .Take(10)
-                .ToList();
-        }
-
         private string BuildMovieText(Movie movie)
         {
             var sb = new StringBuilder();

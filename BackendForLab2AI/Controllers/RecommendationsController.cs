@@ -47,42 +47,6 @@ namespace BackendForLab2AI.Controllers
             }
         }
 
-        [HttpPost("compare-models")]
-        public async Task<ActionResult<List<MovieRecommendation>>> CompareEmbeddingModels([FromBody] string query)
-        {
-            try
-            {
-                var recommendations = await _embeddingService.CompareEmbeddingModelsAsync(query);
-                return Ok(recommendations);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error comparing embedding models");
-                return StatusCode(500, "Internal server error");
-            }
-        }
-
-        [HttpPost("compare-metrics")]
-        public async Task<ActionResult<List<MovieRecommendation>>> CompareDistanceMetrics([FromBody] RecommendationRequest request)
-        {
-            try
-            {
-                var query = request.Description ??
-                    (await _embeddingService.FindSimilarMoviesByTitleAsync(request.MovieTitle ?? "", 1, request.Model, "cosine"))
-                    .FirstOrDefault()?.Movie.Overview ?? "";
-
-                if (string.IsNullOrEmpty(query))
-                    return BadRequest("Could not generate query from provided data");
-
-                var recommendations = await _embeddingService.CompareDistanceMetricsAsync(query, request.Model);
-                return Ok(recommendations);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error comparing distance metrics");
-                return StatusCode(500, "Internal server error");
-            }
-        }
 
         [HttpGet("test-embedding")]
         public async Task<ActionResult<List<float>>> TestEmbedding([FromQuery] string text = "test movie")
