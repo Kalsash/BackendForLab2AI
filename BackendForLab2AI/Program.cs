@@ -45,6 +45,7 @@ builder.Services.AddHttpClient("Ollama", client =>
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddScoped<IAssistantService, AssistantService>();
+builder.Services.AddScoped<IDeepThinkService, DeepThinkService>();
 
 var app = builder.Build();
 

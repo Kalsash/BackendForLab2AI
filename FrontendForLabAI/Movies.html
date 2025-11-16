@@ -128,6 +128,21 @@
             transform: translateY(0);
         }
 
+        /* Стили для кнопки Deep Think */
+        .deep-think-btn {
+            background: linear-gradient(45deg, #6a11cb, #2575fc);
+            color: white;
+        }
+
+        .deep-think-btn:hover {
+            box-shadow: 0 5px 15px rgba(106, 17, 203, 0.4);
+        }
+
+        .deep-think-btn.active {
+            background: linear-gradient(45deg, #2575fc, #6a11cb);
+            box-shadow: 0 0 20px rgba(37, 117, 252, 0.5);
+        }
+
         .movie-card {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 15px;
@@ -169,6 +184,12 @@
         .assistant-message {
             border-left-color: #feca57;
             background: rgba(254, 202, 87, 0.1);
+        }
+
+        .deep-think-message {
+            border-left-color: #6a11cb;
+            background: rgba(106, 17, 203, 0.1);
+            border: 1px solid rgba(106, 17, 203, 0.3);
         }
 
         @keyframes fadeIn {
@@ -362,6 +383,8 @@
             display: flex;
             gap: 10px;
             margin-bottom: 15px;
+            align-items: center;
+            flex-wrap: wrap;
         }
 
         .conversation-id {
@@ -370,6 +393,15 @@
             border-radius: 6px;
             font-size: 0.9rem;
             color: #b8b8b8;
+        }
+
+        .deep-think-indicator {
+            background: linear-gradient(45deg, #6a11cb, #2575fc);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: white;
+            font-weight: 600;
         }
 
         .similarity-score {
@@ -427,6 +459,11 @@
             .tab-buttons {
                 flex-direction: column;
             }
+
+            .conversation-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
         }
     </style>
 </head>
@@ -444,6 +481,9 @@
 
             <div class="conversation-controls">
                 <button type="button" onclick="startNewConversation()">🔄 New Conversation</button>
+                <button type="button" id="deepThinkBtn" class="deep-think-btn" onclick="toggleDeepThink()">
+                    🧠 Deep Think: OFF
+                </button>
                 <div class="conversation-id" id="conversationId">Starting new conversation...</div>
             </div>
 
@@ -451,7 +491,8 @@
                 <div class="chat-message assistant-message">
                     <strong>🤖 Assistant:</strong> Hello! I'm your movie recommendation assistant. Tell me what kind of
                     movies you like, and I'll help you find something great to watch! You can mention genres, moods,
-                    favorite films, or anything else that comes to mind.
+                    favorite films, or anything else that comes to mind.<br><br>
+                    <strong>💡 Pro Tip:</strong> Use the <em>"Deep Think"</em> mode for more detailed analysis and better recommendations!
                 </div>
             </div>
 
@@ -589,6 +630,23 @@
 
         let currentApiBase = API_BASE_URLS[0];
         let currentConversationId = null;
+        let useDeepThink = false;
+
+        // Deep Think toggle function
+        function toggleDeepThink() {
+            useDeepThink = !useDeepThink;
+            const deepThinkBtn = document.getElementById('deepThinkBtn');
+            
+            if (useDeepThink) {
+                deepThinkBtn.innerHTML = '🧠 Deep Think: ON';
+                deepThinkBtn.classList.add('active');
+            } else {
+                deepThinkBtn.innerHTML = '🧠 Deep Think: OFF';
+                deepThinkBtn.classList.remove('active');
+            }
+            
+            debugLog(`Deep Think mode: ${useDeepThink ? 'ON' : 'OFF'}`);
+        }
 
         // Chat functionality
         async function sendMessage() {
@@ -610,7 +668,8 @@
                     body: JSON.stringify({
                         Message: userMessage,
                         ConversationId: currentConversationId,
-                        ResetConversation: false
+                        ResetConversation: false,
+                        UseDeepThink: useDeepThink
                     })
                 });
 
@@ -638,9 +697,23 @@
         function addMessageToChat(role, content, assistantResponse = null) {
             const chatContainer = document.getElementById('chatContainer');
             const messageDiv = document.createElement('div');
-            messageDiv.className = `chat-message ${role}-message`;
+            
+            // Определяем класс сообщения в зависимости от режима
+            let messageClass = `chat-message ${role}-message`;
+            if (assistantResponse && assistantResponse.usedDeepThink) {
+                messageClass = 'chat-message deep-think-message';
+            }
+            
+            messageDiv.className = messageClass;
 
-            let messageContent = `<strong>${role === 'user' ? '👤 You' : '🤖 Assistant'}:</strong> ${escapeHtml(content)}`;
+            let messageContent = `<strong>${role === 'user' ? '👤 You' : '🤖 Assistant'}:</strong>`;
+            
+            // Добавляем индикатор Deep Think если использовался
+            if (assistantResponse && assistantResponse.usedDeepThink) {
+                messageContent += ` <span style="color: #6a11cb; font-weight: 600;">🧠 [Deep Think Analysis]</span>`;
+            }
+            
+            messageContent += ` ${escapeHtml(content)}`;
 
             // Add recommendations if available
             if (assistantResponse && assistantResponse.recommendedMovies && assistantResponse.recommendedMovies.length > 0) {
@@ -669,15 +742,19 @@
 
         function startNewConversation() {
             currentConversationId = null;
+            useDeepThink = false; // Сбрасываем Deep Think при новом разговоре
+            document.getElementById('deepThinkBtn').innerHTML = '🧠 Deep Think: OFF';
+            document.getElementById('deepThinkBtn').classList.remove('active');
+            
             document.getElementById('chatContainer').innerHTML = `
                 <div class="chat-message assistant-message">
-                    <strong>🤖 Assistant:</strong> Hello! I'm your movie recommendation assistant. Tell me what kind of movies you like, and I'll help you find something great to watch! You can mention genres, moods, favorite films, or anything else that comes to mind.
+                    <strong>🤖 Assistant:</strong> Hello! I'm your movie recommendation assistant. Tell me what kind of movies you like, and I'll help you find something great to watch! You can mention genres, moods, favorite films, or anything else that comes to mind.<br><br>
+                    <strong>💡 Pro Tip:</strong> Use the <em>"Deep Think"</em> mode for more detailed analysis and better recommendations!
                 </div>
             `;
             document.getElementById('conversationId').textContent = 'Starting new conversation...';
         }
 
-        // Existing functions (keep all your existing search and recommendation functions)
         function switchTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');

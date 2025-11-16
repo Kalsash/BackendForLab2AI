@@ -6,6 +6,7 @@ namespace BackendForLab2AI.Models
         public string ConversationId { get; set; } = Guid.NewGuid().ToString();
         public List<Message> Messages { get; set; } = new();
         public UserPreferences Preferences { get; set; } = new();
+        public string Language { get; set; } = "en"; // Добавляем язык беседы, по умолчанию английский
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     }
@@ -35,6 +36,9 @@ namespace BackendForLab2AI.Models
         public bool NeedsClarification { get; set; }
         public List<string> ClarificationQuestions { get; set; } = new();
         public string ConversationId { get; set; } = string.Empty;
+
+        public bool UsedDeepThink { get; set; } = false;
+
     }
 
     public class AssistantRequest
@@ -42,5 +46,7 @@ namespace BackendForLab2AI.Models
         public string Message { get; set; } = string.Empty;
         public string? ConversationId { get; set; }
         public bool ResetConversation { get; set; }
+
+        public bool UseDeepThink { get; set; }
     }
 }
