@@ -6,9 +6,35 @@ namespace BackendForLab2AI.Models
         public string ConversationId { get; set; } = Guid.NewGuid().ToString();
         public List<Message> Messages { get; set; } = new();
         public UserPreferences Preferences { get; set; } = new();
-        public string Language { get; set; } = "en"; // Добавляем язык беседы, по умолчанию английский
+        public string Language { get; set; } = "en";
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+        private const int MAX_MESSAGE_HISTORY = 50;
+
+        public void AddMessage(Message message)
+        {
+            Messages.Add(message);
+
+            // Ограничиваем размер истории
+            if (Messages.Count > MAX_MESSAGE_HISTORY)
+            {
+                Messages = Messages.Skip(Messages.Count - MAX_MESSAGE_HISTORY).ToList();
+            }
+
+            UpdatedAt = DateTime.UtcNow;
+        }
+
+        // Перегрузка для удобства
+        public void AddMessage(string role, string content)
+        {
+            AddMessage(new Message
+            {
+                Role = role,
+                Content = content,
+                Timestamp = DateTime.UtcNow
+            });
+        }
     }
 
     public class UserPreferences
@@ -20,6 +46,12 @@ namespace BackendForLab2AI.Models
         public int? DesiredRuntime { get; set; }
         public List<string> PreviouslyLikedMovies { get; set; } = new();
         public List<string> AvoidedMovies { get; set; } = new();
+
+        public List<string> DislikedGenres { get; set; } = new List<string>();
+
+        public List<string> MentionedKeywords { get; set; } = new List<string>();
+
+        public List<string> LikedMovies { get; set; } = new List<string>();
     }
 
     public class Message
@@ -38,6 +70,8 @@ namespace BackendForLab2AI.Models
         public string ConversationId { get; set; } = string.Empty;
 
         public bool UsedDeepThink { get; set; } = false;
+
+        public string EmbeddingQuery { get; set; } = string.Empty;
 
     }
 
