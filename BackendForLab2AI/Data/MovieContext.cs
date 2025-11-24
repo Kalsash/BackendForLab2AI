@@ -1,6 +1,7 @@
 ﻿using BackendForLab2AI.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text.Json;
 
 namespace BackendForLab2AI.Data
@@ -213,29 +214,29 @@ namespace BackendForLab2AI.Data
                 var movie = new Movie
                 {
                     Adult = SafeGetBool(element, "adult"),
-                    BelongsToCollection = SafeGetString(element, "belongsToCollection"),
+                    BelongsToCollection = SafeGetString(element, "belongs_to_collection"),
                     Budget = SafeGetLong(element, "budget"),
                     Genres = SafeGetString(element, "genres"),
                     Homepage = SafeGetString(element, "homepage"),
                     MovieId = SafeGetInt(element, "id") ?? index, 
-                    ImdbId = SafeGetString(element, "imdbId"),
-                    OriginalLanguage = SafeGetString(element, "originalLanguage"),
-                    OriginalTitle = SafeGetString(element, "originalTitle") ?? "Unknown",
+                    ImdbId = SafeGetString(element, "imdb_id"),
+                    OriginalLanguage = SafeGetString(element, "original_language"),
+                    OriginalTitle = SafeGetString(element, "original_title") ?? "Unknown",
                     Overview = SafeGetString(element, "overview"),
                     Popularity = SafeGetDouble(element, "popularity") ?? 0,
-                    PosterPath = SafeGetString(element, "posterPath"),
-                    ProductionCompanies = SafeGetString(element, "productionCompanies"),
-                    ProductionCountries = SafeGetString(element, "productionCountries"),
-                    ReleaseDate = SafeGetDateTime(element, "releaseDate"),
+                    PosterPath = SafeGetString(element, "poster_path"),
+                    ProductionCompanies = SafeGetString(element, "production_companies"),
+                    ProductionCountries = SafeGetString(element, "production_countries"),
+                    ReleaseDate = SafeGetDateTime(element, "release_date"),
                     Revenue = SafeGetLong(element, "revenue"),
                     Runtime = SafeGetInt(element, "runtime"),
-                    SpokenLanguages = SafeGetString(element, "spokenLanguages"),
+                    SpokenLanguages = SafeGetString(element, "spoken_languages"),
                     Status = SafeGetString(element, "status"),
                     Tagline = SafeGetString(element, "tagline"),
                     Title = SafeGetString(element, "title") ?? "Unknown Title",
                     Video = SafeGetBool(element, "video"),
-                    VoteAverage = SafeGetDouble(element, "voteAverage") ?? 0,
-                    VoteCount = SafeGetInt(element, "voteCount") ?? 0
+                    VoteAverage = SafeGetDouble(element, "vote_average") ?? 0,
+                    VoteCount = SafeGetInt(element, "vote_count") ?? 0
                 };
 
                 return movie;
@@ -280,7 +281,38 @@ namespace BackendForLab2AI.Data
                 {
                     var dateString = value.GetString();
                     if (string.IsNullOrEmpty(dateString)) return null;
-                    return DateTime.TryParse(dateString, out DateTime date) ? date : null;
+
+                    // Основные форматы дат
+                    string[] formats = {
+                "yyyy-MM-dd",
+                "yyyy-MM-ddTHH:mm:ss.fffZ",
+                "yyyy-MM-ddTHH:mm:ssZ",
+                "yyyy/MM/dd",
+                "MM/dd/yyyy",
+                "dd/MM/yyyy"
+            };
+
+                    if (DateTime.TryParseExact(dateString, formats,
+                        CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime date))
+                    {
+                        // Убеждаемся, что DateTime имеет правильный Kind для PostgreSQL
+                        if (date.Kind == DateTimeKind.Unspecified)
+                        {
+                            // Предполагаем, что даты из JSON - UTC
+                            return DateTime.SpecifyKind(date, DateTimeKind.Utc);
+                        }
+                        return date;
+                    }
+
+                    // Fallback на обычный парсинг
+                    if (DateTime.TryParse(dateString, out date))
+                    {
+                        if (date.Kind == DateTimeKind.Unspecified)
+                        {
+                            return DateTime.SpecifyKind(date, DateTimeKind.Utc);
+                        }
+                        return date;
+                    }
                 }
             }
             catch

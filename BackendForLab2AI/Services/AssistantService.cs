@@ -407,6 +407,11 @@ MOVIES FOUND: {movies.Count}
 MOVIE RESULTS:
 {moviesInfo}
 
+CRITICAL FORMATTING RULES:
+- ALWAYS include the release year in parentheses after each movie title
+- Example: ""Inception (2010)"", NOT just ""Inception""
+- This is mandatory for every movie mention
+
 Create a friendly, conversational response that:
 1. Acknowledges the user's request
 2. Mentions that you searched using appropriate tools
@@ -414,7 +419,8 @@ Create a friendly, conversational response that:
 4. Explains why these movies match their request
 5. Invites further conversation
 
-Make it sound natural and enthusiastic!";
+Make it sound natural and enthusiastic!
+RESPONSE (with years):";
 
             var response = await CallLlmAsync(prompt, "gemma3:1b", 0.7);
             return response ?? CreateDefaultResponse(movies, userMessage);
@@ -432,7 +438,7 @@ Make it sound natural and enthusiastic!";
 Based on:
 - User's request: ""{userMessage}""
 - Tools used: {toolsUsed}
-- Recommended movies: {string.Join(", ", movies.Take(3).Select(m => m.Title))}
+- Recommended movies: {string.Join(", ", movies.Take(5).Select(m => $"{m.Title} ({m.ReleaseDate?.Year})"))}
 
 Generate 2-3 engaging, open-ended questions that will help understand the user's movie preferences better for future recommendations.
 
