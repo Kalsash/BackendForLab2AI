@@ -1,4 +1,4 @@
-﻿// AssistantService.cs
+﻿// Services/AssistantService.cs
 using BackendForLab2AI.Models;
 using System.Collections.Generic;
 using System.Text;
@@ -18,44 +18,41 @@ namespace BackendForLab2AI.Services
     public class AssistantService : IAssistantService
     {
         private readonly IEmbeddingService _embeddingService;
-        private readonly IMovieService _movieService;
+        private readonly IMovieSearchToolService _movieSearchTool;
         private readonly IDeepThinkService _deepThinkService;
         private readonly HttpClient _httpClient;
         private readonly ILogger<AssistantService> _logger;
-        public string HistoryMessage = "";
 
-        // ЕДИНАЯ беседа вместо словаря
+        public string HistoryMessage = "";
         private ConversationState _currentConversation;
 
         public AssistantService(
             IEmbeddingService embeddingService,
-            IMovieService movieService,
+            IMovieSearchToolService movieSearchTool,
             IDeepThinkService deepThinkService,
             IHttpClientFactory httpClientFactory,
             ILogger<AssistantService> logger)
         {
             _embeddingService = embeddingService;
-            _movieService = movieService;
+            _movieSearchTool = movieSearchTool;
             _deepThinkService = deepThinkService;
             _httpClient = httpClientFactory.CreateClient("Ollama");
             _logger = logger;
+            _currentConversation = CreateNewConversation();
         }
 
         public async Task<AssistantResponse> ProcessMessageAsync(AssistantRequest request, ConversationState conversation)
         {
             try
             {
-                // Если запрошен сброс, создаем новую беседу
                 if (request.ResetConversation)
                 {
                     _currentConversation = CreateNewConversation();
                     _logger.LogInformation("Conversation reset requested, created new conversation");
                 }
 
-                // Всегда используем текущую беседу
                 _currentConversation = conversation;
 
-                // ДЕБАГ: Логируем текущее состояние диалога
                 _logger.LogInformation("Conversation has {MessageCount} messages before processing new message",
                     conversation.Messages.Count);
 
@@ -66,6 +63,7 @@ namespace BackendForLab2AI.Services
                     Content = request.Message + (request.UseDeepThink ? " [DEEP THINK MODE]" : "")
                 });
                 HistoryMessage += request.Message + (request.UseDeepThink ? " [DEEP THINK MODE]" : "");
+
                 AssistantResponse response;
 
                 if (request.UseDeepThink)
@@ -74,8 +72,8 @@ namespace BackendForLab2AI.Services
                 }
                 else
                 {
-                    // ПРОСТАЯ ЛОГИКА: всегда ищем фильмы и показываем 5 штук
-                    response = await ProcessSimpleMovieSearch(conversation, request.Message);
+                    // Используем интеллектуальный поиск с настоящим tool calling
+                    response = await ProcessWithToolCallingAsync(conversation, request.Message);
                 }
 
                 // Сохраняем ответ ассистента
@@ -86,7 +84,6 @@ namespace BackendForLab2AI.Services
                 });
                 conversation.UpdatedAt = DateTime.UtcNow;
 
-                // ДЕБАГ: Логируем обновленное состояние
                 _logger.LogInformation("Conversation now has {MessageCount} messages after processing",
                     conversation.Messages.Count);
 
@@ -104,182 +101,463 @@ namespace BackendForLab2AI.Services
             }
         }
 
-        // МЕТОД: Создание новой беседы
-        private ConversationState CreateNewConversation()
-        {
-            var conversation = new ConversationState();
-
-            // Устанавливаем фиксированный ID для единой беседы
-            conversation.ConversationId = "single-conversation";
-
-            conversation.Messages.Add(new Message
-            {
-                Role = "system",
-                Content = "You are a movie recommendation assistant. Always find and recommend exactly 5 movies from the database for every user request."
-            });
-
-            _logger.LogInformation("Created new single conversation with ID: {ConversationId}", conversation.ConversationId);
-            return conversation;
-        }
-
-        // УПРОЩЕННЫЙ МЕТОД: всегда ищем фильмы
-        private async Task<AssistantResponse> ProcessSimpleMovieSearch(ConversationState conversation, string userMessage)
+        // ОСНОВНОЙ МЕТОД: Настоящий Tool Calling
+        private async Task<AssistantResponse> ProcessWithToolCallingAsync(ConversationState conversation, string userMessage)
         {
             try
             {
-                // Шаг 1: Создаем поисковый запрос для эмбеддингов с учетом истории
-                var (searchQuery, preferencesInfo) = await CreateSearchQueryWithHistoryAsync(userMessage, conversation);
+                _logger.LogInformation("Starting tool calling for: {UserMessage}", userMessage);
 
-                // Шаг 2: Ищем фильмы в базе через эмбеддинги
-                var searchResults = await _embeddingService.FindSimilarMoviesAsync(searchQuery, 15, "bge-m3", "cosine");
-                var movies = searchResults.Select(r => r.Movie).ToList();
+                // 1. Создаем описание инструментов
+                var toolsDescription = CreateToolsDescription();
 
-                // Шаг 3: Берем ТОЧНО 5 фильмов (даже если нужно дополнить)
-                var recommendedMovies = await EnsureFiveMoviesAsync(movies, searchQuery, conversation);
+                // 2. Формируем системный промпт с инструментами
+                var systemPrompt = CreateSystemPromptWithTools();
 
-                // Шаг 4: Генерируем ответ с рекомендациями
-                var response = await GenerateMovieResponseAsync(conversation, recommendedMovies, searchQuery, userMessage, preferencesInfo);
+                // 3. Отправляем запрос к LLM с инструментами
+                var llmResponse = await CallLlmWithToolsAsync(systemPrompt, userMessage, conversation);
 
-                return response;
+                // 4. Обрабатываем ответ LLM - проверяем, хочет ли она использовать инструменты
+                var toolCalls = ExtractToolCalls(llmResponse);
+
+                if (toolCalls.Any())
+                {
+                    _logger.LogInformation("LLM decided to use {Count} tools", toolCalls.Count);
+
+                    // 5. Исполняем вызовы инструментов
+                    var toolResults = await ExecuteToolCallsAsync(toolCalls, userMessage);
+
+                    // 6. Генерируем финальный ответ на основе результатов инструментов
+                    return await GenerateFinalResponseWithToolsAsync(toolResults, userMessage, conversation, toolCalls);
+                }
+                else
+                {
+                    _logger.LogInformation("LLM decided to respond directly without tools");
+
+                    // 7. Если инструменты не нужны - генерируем прямой ответ
+                    return await GenerateDirectResponseAsync(userMessage, conversation, llmResponse);
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in simple movie search");
-                return CreateFallbackResponse(conversation.ConversationId);
+                _logger.LogError(ex, "Error in tool calling process");
+                return await ProcessFallbackSearchAsync(conversation, userMessage);
             }
         }
 
-        // МЕТОД: Создаем поисковый запрос для эмбеддингов С УЧЕТОМ ИСТОРИИ
-        private async Task<(string SearchQuery, string PreferencesInfo)> CreateSearchQueryWithHistoryAsync(string userMessage, ConversationState conversation)
+        // МЕТОД: Создание описания инструментов
+        private string CreateToolsDescription()
         {
-            // Получаем историю диалога (только пользовательские сообщения)
-            var userMessages = conversation.Messages
-                .Where(m => m.Role == "user")
-                .Select(m => m.Content.Replace(" [DEEP THINK MODE]", ""))
-                .ToList();
+            return @"
+AVAILABLE TOOLS:
 
-            var preferencesInfo = new StringBuilder();
-            preferencesInfo.AppendLine("🎯 **User Preferences Analysis:**");
+1. search_movies - Search movies by keywords, titles, or descriptions
+   Usage: When user wants to find movies by specific keywords, titles, or themes
+   Parameters: query (string), limit (number, default: 5)
 
-            // ДЕБАГ: Логируем детали истории
-            _logger.LogInformation("Processing message for conversation. User messages count: {Count}",
-                userMessages.Count);
+2. search_by_genre - Search movies by specific genre
+   Usage: When user mentions specific genres like 'comedy', 'drama', 'action'
+   Parameters: genre (string), limit (number, default: 5)
 
-            // Проверяем, действительно ли это первое сообщение
-            var isFirstMessage = userMessages.Count <= 1;
+3. search_by_mood - Search movies by mood or feeling
+   Usage: When user describes mood like 'relaxing', 'exciting', 'funny', 'emotional'
+   Parameters: mood (string), limit (number, default: 5)
 
-            if (isFirstMessage)
-            {
-                var simpleQuery = await CreateSimpleSearchQueryAsync(userMessage);
-                UpdateUserPreferences(conversation, userMessage, simpleQuery);
+4. find_similar_movies - Find movies similar to a description
+   Usage: When user says 'similar to X', 'like X', or describes movie qualities
+   Parameters: description (string), limit (number, default: 5)
 
-                preferencesInfo.AppendLine("- First message, no history yet");
-                preferencesInfo.AppendLine($"- Current request: `{userMessage}`");
-                preferencesInfo.AppendLine($"- Extracted genres: `{string.Join(", ", conversation.Preferences.Genres)}`");
+TOOL CALLING FORMAT:
+If you need to use a tool, respond in this exact format:
 
-                return (simpleQuery, preferencesInfo.ToString());
-            }
+THOUGHT: [Your reasoning about whether to use tools and which ones]
+USE_TOOL: [tool_name]
+TOOL_PARAMS: [JSON parameters]
+CONTINUE: [Your message while waiting for tool results]
 
-            // ЕСТЬ ИСТОРИЯ: используем умный анализ
-            var previousUserMessages = userMessages.Take(userMessages.Count - 1).ToList(); // Все кроме текущего
-            var currentMessage = userMessage;
+Example:
+THOUGHT: User wants comedy movies, so I should use search_by_genre tool
+USE_TOOL: search_by_genre
+TOOL_PARAMS: {""genre"": ""comedy"", ""limit"": 5}
+CONTINUE: I'll find some great comedy movies for you!
 
-            preferencesInfo.AppendLine($"- Previous messages in conversation: `{previousUserMessages.Count}`");
-            preferencesInfo.AppendLine($"- Previous user requests: `{string.Join(" → ", previousUserMessages.TakeLast(3))}`");
-            preferencesInfo.AppendLine($"- Current request: `{currentMessage}`");
-            preferencesInfo.AppendLine($"- Saved preferences: `{string.Join(", ", conversation.Preferences.Genres)}`");
-
-            // Анализируем контекст диалога
-            var conversationContext = AnalyzeConversationContext(conversation, currentMessage);
-
-            preferencesInfo.AppendLine($"- Context analysis: `{(conversationContext.IsGenreChange ? "GENRE CHANGE" : "CONTINUATION")}`");
-
-            // Создаем комбинированный запрос на основе истории
-            var combinedQuery = await CreateCombinedSearchQueryAsync(currentMessage, conversationContext, conversation);
-
-            // Обновляем предпочтения пользователя
-            UpdateUserPreferences(conversation, currentMessage, combinedQuery);
-
-            preferencesInfo.AppendLine($"- Final query: `{combinedQuery}`");
-            preferencesInfo.AppendLine($"- Strategy: `{(conversationContext.IsGenreChange ? "COMBINE genres" : "ENHANCE current")}`");
-            preferencesInfo.AppendLine($"- Updated preferences: `{string.Join(", ", conversation.Preferences.Genres)}`");
-
-            _logger.LogInformation("Created SMART search query: '{SearchQuery}' for conversation with {HistoryCount} previous messages",
-                combinedQuery, previousUserMessages.Count);
-
-            return (combinedQuery, preferencesInfo.ToString());
+If you don't need tools, respond normally.";
         }
 
-        // МЕТОД: Анализ контекста диалога (УПРОЩЕННЫЙ И НАДЕЖНЫЙ)
-        private ConversationContext AnalyzeConversationContext(ConversationState conversation, string currentMessage)
+        // МЕТОД: Создание системного промпта с инструментами
+        private string CreateSystemPromptWithTools()
         {
-            var userMessages = conversation.Messages
-                .Where(m => m.Role == "user")
-                .Select(m => m.Content.Replace(" [DEEP THINK MODE]", ""))
-                .ToList();
+            return @"You are a movie recommendation assistant with access to search tools.
 
-            var context = new ConversationContext
-            {
-                PrimaryGenres = conversation.Preferences.Genres.Take(3).ToList(),
-                IsContinuation = userMessages.Count > 1
-            };
+IMPORTANT INSTRUCTIONS:
+- Always try to find and recommend exactly 5 movies from the database
+- Use search tools when user asks for movie recommendations
+- Choose the most appropriate tool based on the request
+- If tools don't find enough movies, you can try alternative searches
+- Be conversational and helpful
 
-            if (!context.PrimaryGenres.Any())
-            {
-                context.IsGenreChange = false;
-                return context;
-            }
-
-            // Анализируем смену жанра
-            var currentGenres = ExtractGenresFromText(currentMessage);
-            var hasGenreOverlap = context.PrimaryGenres.Any(previousGenre =>
-                currentGenres.Any(currentGenre =>
-                    currentGenre.Contains(previousGenre) || previousGenre.Contains(currentGenre)));
-
-            context.IsGenreChange = !hasGenreOverlap;
-
-            _logger.LogInformation("Context analysis - Previous: [{Previous}], Current: [{Current}], GenreChange: {IsGenreChange}",
-                string.Join(", ", context.PrimaryGenres), string.Join(", ", currentGenres), context.IsGenreChange);
-
-            return context;
+" + CreateToolsDescription();
         }
 
-        // МЕТОД: Создание комбинированного поискового запроса
-        private async Task<string> CreateCombinedSearchQueryAsync(string userMessage, ConversationContext context, ConversationState conversation)
+        // МЕТОД: Вызов LLM с инструментами
+        private async Task<string> CallLlmWithToolsAsync(string systemPrompt, string userMessage, ConversationState conversation)
         {
-            // Если обнаружена смена жанра, комбинируем с предыдущими предпочтениями
-            if (context.IsGenreChange && context.PrimaryGenres.Any())
+            var fullPrompt = $@"
+{systemPrompt}
+
+CONVERSATION HISTORY: {HistoryMessage}
+USER PREFERENCES: {string.Join(", ", conversation.Preferences.Genres)}
+
+CURRENT REQUEST: {userMessage}
+
+Please analyze the request and decide if you need to use search tools. Remember to use the exact tool calling format if you need tools.";
+
+            return await CallLlmAsync(fullPrompt, "gemma3:1b", 0.3);
+        }
+
+        // МЕТОД: Извлечение вызовов инструментов из ответа LLM
+        private List<ToolCall> ExtractToolCalls(string llmResponse)
+        {
+            var toolCalls = new List<ToolCall>();
+
+            if (string.IsNullOrEmpty(llmResponse))
+                return toolCalls;
+
+            var lines = llmResponse.Split('\n');
+            ToolCall currentTool = null;
+
+            foreach (var line in lines)
             {
-                var previousGenres = string.Join(" ", context.PrimaryGenres.Take(2));
-                var currentQuery = await CreateSimpleSearchQueryAsync(userMessage);
-
-                // Комбинируем: текущий запрос + предыдущие жанры
-                var combinedQuery = $"{currentQuery} {previousGenres}";
-
-                _logger.LogInformation("Creating COMBINED query: '{Current}' + '{Previous}' = '{Combined}'",
-                    currentQuery, previousGenres, combinedQuery);
-
-                return combinedQuery.Trim();
-            }
-
-            // Если жанр тот же, просто улучшаем текущий запрос
-            var enhancedQuery = await CreateSimpleSearchQueryAsync(userMessage);
-
-            // Добавляем контекст из предпочтений если есть
-            if (context.PrimaryGenres.Any())
-            {
-                var mainGenre = context.PrimaryGenres.First();
-                if (!enhancedQuery.ToLower().Contains(mainGenre))
+                if (line.StartsWith("USE_TOOL:"))
                 {
-                    enhancedQuery = $"{enhancedQuery} {mainGenre}";
+                    if (currentTool != null)
+                        toolCalls.Add(currentTool);
+
+                    currentTool = new ToolCall
+                    {
+                        ToolName = line.Replace("USE_TOOL:", "").Trim()
+                    };
+                }
+                else if (line.StartsWith("TOOL_PARAMS:") && currentTool != null)
+                {
+                    try
+                    {
+                        var jsonParams = line.Replace("TOOL_PARAMS:", "").Trim();
+                        currentTool.Parameters = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonParams)
+                                              ?? new Dictionary<string, object>();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse tool parameters: {Line}", line);
+                    }
+                }
+                else if (line.StartsWith("CONTINUE:") && currentTool != null)
+                {
+                    currentTool.ContinueMessage = line.Replace("CONTINUE:", "").Trim();
                 }
             }
 
-            _logger.LogInformation("Creating ENHANCED query: '{Enhanced}'", enhancedQuery);
-            return enhancedQuery.Trim();
+            if (currentTool != null)
+                toolCalls.Add(currentTool);
+
+            return toolCalls;
         }
 
-        // МЕТОД: Извлечение жанров из текста
+        // МЕТОД: Исполнение вызовов инструментов
+        private async Task<List<ToolResult>> ExecuteToolCallsAsync(List<ToolCall> toolCalls, string query)
+        {
+            var results = new List<ToolResult>();
+
+            foreach (var toolCall in toolCalls)
+            {
+                try
+                {
+                    _logger.LogInformation("Executing tool: {ToolName} with params: {Params}",
+                        toolCall.ToolName, JsonSerializer.Serialize(toolCall.Parameters));
+
+                    List<Movie> movies = new List<Movie>();
+                  //  movies = await _movieSearchTool.SearchMoviesAsync(query, 5);
+                    switch (toolCall.ToolName.ToLower())
+                    {
+                        case "search_movies":
+                            var limit = GetLimitFromParams(toolCall.Parameters);
+                            movies = await _movieSearchTool.SearchMoviesAsync(query, limit);
+                            break;
+
+                        case "search_by_genre":
+                            var genre = toolCall.Parameters.GetValueOrDefault("genre")?.ToString() ?? query;
+                            limit = GetLimitFromParams(toolCall.Parameters);
+                            movies = await _movieSearchTool.SearchByGenreAsync(genre, limit);
+                            break;
+
+                        case "search_by_mood":
+                            var mood = toolCall.Parameters.GetValueOrDefault("mood")?.ToString() ?? query;
+                            limit = GetLimitFromParams(toolCall.Parameters);
+                            movies = await _movieSearchTool.SearchByMoodAsync(mood, limit);
+                            break;
+
+                        case "find_similar_movies":
+                            var description = toolCall.Parameters.GetValueOrDefault("description")?.ToString() ?? query;
+                            limit = GetLimitFromParams(toolCall.Parameters);
+                            movies = await _movieSearchTool.FindSimilarMoviesAsync(description, limit);
+                            break;
+
+                        default:
+                            _logger.LogWarning("Unknown tool: {ToolName}", toolCall.ToolName);
+                            break;
+                    }
+
+                    results.Add(new ToolResult
+                    {
+                        ToolCall = toolCall,
+                        Movies = movies,
+                        Success = movies.Any()
+                    });
+
+                    _logger.LogInformation("Tool {ToolName} executed successfully, found {Count} movies",
+                        toolCall.ToolName, movies.Count);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error executing tool: {ToolName}", toolCall.ToolName);
+                    results.Add(new ToolResult
+                    {
+                        ToolCall = toolCall,
+                        Movies = new List<Movie>(),
+                        Success = false,
+                        Error = ex.Message
+                    });
+                }
+            }
+
+            return results;
+        }
+
+        // МЕТОД: Генерация финального ответа с результатами инструментов
+        private async Task<AssistantResponse> GenerateFinalResponseWithToolsAsync(
+            List<ToolResult> toolResults,
+            string userMessage,
+            ConversationState conversation,
+            List<ToolCall> toolCalls)
+        {
+            try
+            {
+                // Собираем все найденные фильмы
+                var allMovies = toolResults
+                    .Where(r => r.Success)
+                    .SelectMany(r => r.Movies)
+                    .GroupBy(m => m.Id)
+                    .Select(g => g.First())
+                    .Take(5)
+                    .ToList();
+
+                // Гарантируем 5 фильмов
+                var finalMovies = await EnsureFiveMoviesAsync(allMovies, userMessage);
+
+                // Обновляем предпочтения пользователя
+                UpdateUserPreferences(conversation, userMessage, userMessage);
+
+                // Генерируем интеллектуальный ответ
+                var response = await GenerateToolEnhancedResponseAsync(finalMovies, userMessage, toolResults, toolCalls);
+
+                // Генерируем уточняющие вопросы
+                var followUpQuestions = await GenerateFollowUpQuestionsAsync(finalMovies, userMessage, toolCalls);
+
+                return new AssistantResponse
+                {
+                    Response = response,
+                    RecommendedMovies = finalMovies,
+                    ConversationId = conversation.ConversationId,
+                    UsedDeepThink = false,
+                    EmbeddingQuery = userMessage,
+                    FollowUpQuestions = followUpQuestions,
+                    ReasoningContext = $"Used tools: {string.Join(", ", toolCalls.Select(t => t.ToolName))}",
+                    ToolCalls = toolCalls,
+                    ToolResults = toolResults
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating final response with tools");
+                return await ProcessFallbackSearchAsync(conversation, userMessage);
+            }
+        }
+
+        // МЕТОД: Генерация улучшенного ответа с учетом инструментов
+        private async Task<string> GenerateToolEnhancedResponseAsync(
+            List<Movie> movies,
+            string userMessage,
+            List<ToolResult> toolResults,
+            List<ToolCall> toolCalls)
+        {
+            if (!movies.Any())
+            {
+                return "I searched for movies using several approaches, but couldn't find good matches for your request. Could you try different keywords or be more specific?";
+            }
+
+            var toolsUsed = string.Join(", ", toolCalls.Select(t => t.ToolName));
+            var moviesInfo = string.Join("\n", movies.Select((m, i) =>
+                $"{i + 1}. {m.Title} ({m.ReleaseDate?.Year}) - {FormatGenres(m.Genres)}"));
+
+            var prompt = $@"
+USER REQUEST: ""{userMessage}""
+TOOLS USED: {toolsUsed}
+MOVIES FOUND: {movies.Count}
+
+MOVIE RESULTS:
+{moviesInfo}
+
+Create a friendly, conversational response that:
+1. Acknowledges the user's request
+2. Mentions that you searched using appropriate tools
+3. Highlights the recommended movies
+4. Explains why these movies match their request
+5. Invites further conversation
+
+Make it sound natural and enthusiastic!";
+
+            var response = await CallLlmAsync(prompt, "gemma3:1b", 0.7);
+            return response ?? CreateDefaultResponse(movies, userMessage);
+        }
+
+        // МЕТОД: Генерация уточняющих вопросов
+        private async Task<string> GenerateFollowUpQuestionsAsync(List<Movie> movies, string userMessage, List<ToolCall> toolCalls)
+        {
+            if (!movies.Any()) return string.Empty;
+
+            try
+            {
+                var toolsUsed = string.Join(", ", toolCalls.Select(t => t.ToolName));
+                var prompt = $@"
+Based on:
+- User's request: ""{userMessage}""
+- Tools used: {toolsUsed}
+- Recommended movies: {string.Join(", ", movies.Take(3).Select(m => m.Title))}
+
+Generate 2-3 engaging, open-ended questions that will help understand the user's movie preferences better for future recommendations.
+
+Make the questions:
+- Conversational and natural
+- Open-ended (not yes/no)
+- Relevant to the current context
+- Helpful for improving recommendations
+
+QUESTIONS:";
+
+                var questions = await CallLlmAsync(prompt, "gemma3:1b", 0.6);
+                return questions?.Trim() ?? string.Empty;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate follow-up questions");
+                return string.Empty;
+            }
+        }
+
+        // МЕТОД: Прямой ответ без инструментов
+        private async Task<AssistantResponse> GenerateDirectResponseAsync(string userMessage, ConversationState conversation, string llmResponse)
+        {
+            // Для простых запросов, не требующих поиска
+            return new AssistantResponse
+            {
+                Response = llmResponse,
+                RecommendedMovies = new List<Movie>(),
+                ConversationId = conversation.ConversationId,
+                UsedDeepThink = false,
+                ReasoningContext = "Direct response without tools"
+            };
+        }
+
+        // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+
+        private int GetLimitFromParams(Dictionary<string, object> parameters)
+        {
+            if (parameters.ContainsKey("limit") && int.TryParse(parameters["limit"]?.ToString(), out int limit))
+            {
+                return limit;
+            }
+            return 5;
+        }
+
+        private async Task<List<Movie>> EnsureFiveMoviesAsync(List<Movie> initialMovies, string searchQuery)
+        {
+            var movies = initialMovies.Take(5).ToList();
+
+            if (movies.Count >= 5)
+            {
+                return movies;
+            }
+
+            _logger.LogInformation("Only found {Count} movies with tools, searching for more...", movies.Count);
+
+            // Дополнительный поиск если инструменты нашли мало фильмов
+            try
+            {
+                var additionalMovies = await _movieSearchTool.SearchMoviesAsync(searchQuery, 5 - movies.Count);
+                var newMovies = additionalMovies
+                    .Where(m => !movies.Any(existing => existing.Id == m.Id))
+                    .Take(5 - movies.Count)
+                    .ToList();
+
+                movies.AddRange(newMovies);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to find additional movies");
+            }
+
+            return movies.Take(5).ToList();
+        }
+
+        private string CreateDefaultResponse(List<Movie> movies, string userMessage)
+        {
+            var response = new StringBuilder();
+            response.AppendLine($"Based on your request \"{userMessage}\", I found these great movies for you:\n");
+
+            foreach (var (movie, index) in movies.Select((m, i) => (m, i)))
+            {
+                response.AppendLine($"{index + 1}. **{movie.Title}** ({movie.ReleaseDate?.Year})");
+                response.AppendLine($"   - {FormatGenres(movie.Genres)}");
+                if (!string.IsNullOrEmpty(movie.Overview) && movie.Overview.Length > 100)
+                {
+                    response.AppendLine($"   - {movie.Overview.Substring(0, 100)}...");
+                }
+                response.AppendLine();
+            }
+
+            response.AppendLine("Which of these sounds interesting? I can tell you more about any of them!");
+            return response.ToString();
+        }
+
+        private void UpdateUserPreferences(ConversationState conversation, string userMessage, string searchQuery)
+        {
+            try
+            {
+                var foundGenres = ExtractGenresFromText(searchQuery);
+                var messageGenres = ExtractGenresFromText(userMessage);
+                var allGenres = foundGenres.Union(messageGenres).ToList();
+
+                foreach (var genre in allGenres)
+                {
+                    if (!conversation.Preferences.Genres.Contains(genre))
+                    {
+                        conversation.Preferences.Genres.Add(genre);
+                    }
+                }
+
+                conversation.Preferences.Genres = conversation.Preferences.Genres
+                    .Distinct()
+                    .Take(8)
+                    .ToList();
+
+                _logger.LogInformation("Updated preferences: {Genres}", string.Join(", ", conversation.Preferences.Genres));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to update user preferences");
+            }
+        }
+
         private List<string> ExtractGenresFromText(string text)
         {
             var genreKeywords = new Dictionary<string, string>
@@ -313,221 +591,6 @@ namespace BackendForLab2AI.Services
             return foundGenres;
         }
 
-        // УПРОЩЕННЫЙ МЕТОД для простых запросов
-        private async Task<string> CreateSimpleSearchQueryAsync(string userMessage)
-        {
-            // Если сообщение короткое или простое, используем его как есть
-            if (userMessage.Length < 50 && !userMessage.Contains("?"))
-            {
-                return userMessage;
-            }
-
-            var queryPrompt = $@"
-User request: {userMessage}
-
-Create a SHORT search query for movie database (2-4 words).
-Focus on key keywords for movie search.
-
-Examples:
-- ""научно-фантастические фильмы"" -> ""sci-fi""
-- ""комедийные фильмы про любовь"" -> ""romantic comedy""
-- ""фильмы про космос"" -> ""space""
-- ""грустные драмы"" -> ""drama""
-
-Return ONLY the search query:";
-
-            var searchQuery = await CallLlmAsync(queryPrompt, "gemma3:1b", 0.1);
-
-            return string.IsNullOrEmpty(searchQuery) ? userMessage : searchQuery.Trim();
-        }
-
-        // МЕТОД: Обновление предпочтений пользователя
-        private void UpdateUserPreferences(ConversationState conversation, string userMessage, string searchQuery)
-        {
-            try
-            {
-                // Извлекаем жанры из поискового запроса и сообщения
-                var foundGenres = ExtractGenresFromText(searchQuery);
-                var messageGenres = ExtractGenresFromText(userMessage);
-
-                // Объединяем все найденные жанры
-                var allGenres = foundGenres.Union(messageGenres).ToList();
-
-                // Добавляем в предпочтения
-                foreach (var genre in allGenres)
-                {
-                    if (!conversation.Preferences.Genres.Contains(genre))
-                    {
-                        conversation.Preferences.Genres.Add(genre);
-                    }
-                }
-
-                // Ограничиваем размер списка
-                conversation.Preferences.Genres = conversation.Preferences.Genres
-                    .Distinct()
-                    .Take(8)
-                    .ToList();
-
-                _logger.LogInformation("Updated preferences for conversation: {Genres}",
-                    string.Join(", ", conversation.Preferences.Genres));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to update user preferences for conversation");
-            }
-        }
-
-        // МЕТОД: Гарантируем 5 фильмов
-        private async Task<List<Movie>> EnsureFiveMoviesAsync(List<Movie> initialMovies, string searchQuery, ConversationState conversation)
-        {
-            var movies = initialMovies.Take(5).ToList();
-
-            // Если уже есть 5+ фильмов - отлично
-            if (movies.Count >= 5)
-            {
-                return movies.Take(5).ToList();
-            }
-
-            _logger.LogInformation("Only found {Count} movies, searching for more...", movies.Count);
-
-            // Пробуем альтернативные поисковые запросы с учетом предпочтений
-            var alternativeQueries = new List<string> { searchQuery };
-
-            // Добавляем запросы на основе предпочтений пользователя
-            if (conversation.Preferences.Genres.Any())
-            {
-                var preferredGenres = string.Join(" ", conversation.Preferences.Genres.Take(2));
-                alternativeQueries.Add(preferredGenres + " movies");
-                alternativeQueries.Add($"{searchQuery} {preferredGenres}");
-            }
-
-            // Стандартные запасные варианты
-            alternativeQueries.AddRange(new List<string> { "popular", "highly rated", "classic" });
-
-            foreach (var altQuery in alternativeQueries.Distinct())
-            {
-                if (movies.Count >= 5) break;
-
-                try
-                {
-                    var additionalResults = await _embeddingService.FindSimilarMoviesAsync(altQuery, 10, "bge-m3", "cosine");
-                    var additionalMovies = additionalResults.Select(r => r.Movie)
-                        .Where(m => !movies.Any(existing => existing.Id == m.Id))
-                        .Take(5 - movies.Count)
-                        .ToList();
-
-                    movies.AddRange(additionalMovies);
-
-                    _logger.LogInformation("Added {AddedCount} movies from alternative query: '{AltQuery}'",
-                        additionalMovies.Count, altQuery);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to search with alternative query: {AltQuery}", altQuery);
-                }
-            }
-
-            // Если все еще меньше 5, берем любые популярные фильмы
-            if (movies.Count < 5)
-            {
-                try
-                {
-                    var popularResults = await _embeddingService.FindSimilarMoviesAsync("popular blockbuster", 10, "bge-m3", "cosine");
-                    var popularMovies = popularResults.Select(r => r.Movie)
-                        .Where(m => !movies.Any(existing => existing.Id == m.Id))
-                        .Take(5 - movies.Count)
-                        .ToList();
-
-                    movies.AddRange(popularMovies);
-
-                    _logger.LogInformation("Added {AddedCount} popular movies to reach total of {TotalCount}",
-                        popularMovies.Count, movies.Count);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to get popular movies");
-                }
-            }
-
-            return movies.Take(5).ToList();
-        }
-
-        // МЕТОД: Генерация ответа с фильмами
-        private async Task<AssistantResponse> GenerateMovieResponseAsync(ConversationState conversation, List<Movie> movies, string searchQuery, string userMessage, string preferencesInfo)
-        {
-            if (!movies.Any())
-            {
-                return new AssistantResponse
-                {
-                    Response = $"{preferencesInfo}\n\n🔍 **Search query used**: `{searchQuery}`\n\nI couldn't find any movies matching your request.",
-                    ConversationId = conversation.ConversationId,
-                    RecommendedMovies = new List<Movie>(),
-                    UsedDeepThink = false,
-                    EmbeddingQuery = searchQuery
-                };
-            }
-
-            var responseBuilder = new StringBuilder();
-
-            // Показываем анализ предпочтений ПЕРВЫМ делом
-            responseBuilder.AppendLine(preferencesInfo);
-            responseBuilder.AppendLine();
-            responseBuilder.AppendLine("History: " + HistoryMessage);
-            responseBuilder.AppendLine($"🔍 **Final search query**: `{searchQuery}`");
-
-            //// Анализируем связь с историей
-            //var hasHistory = conversation.Messages.Count(m => m.Role == "user") > 1;
-            //var previousGenres = conversation.Preferences.Genres.Take(3).ToList();
-
-            //if (hasHistory && previousGenres.Any())
-            //{
-            //    var currentGenres = ExtractGenresFromText(searchQuery);
-            //    var isGenreTransition = !currentGenres.Any(g => previousGenres.Contains(g));
-
-            //    if (isGenreTransition)
-            //    {
-            //        responseBuilder.AppendLine($"🔄 **Genre transition detected**: Adding your previous interests (`{string.Join(", ", previousGenres)}`) to current request");
-            //    }
-            //    else
-            //    {
-            //        responseBuilder.AppendLine($"🎯 **Building on your preferences**: `{string.Join(", ", previousGenres)}`");
-            //    }
-            //}
-
-            responseBuilder.AppendLine();
-
-            // Генерируем персонализированный ответ
-            var responsePrompt = $@"
-USER'S CURRENT REQUEST: {userMessage}
-SEARCH QUERY USED: {searchQuery}
-USER'S PREFERENCES FROM HISTORY: {HistoryMessage}
-
-MOVIES TO RECOMMEND:
-{string.Join("\n", movies.Select((m, i) => $"{i + 1}. {m.Title} ({m.ReleaseDate?.Year}) - {FormatGenres(m.Genres)}"))}
-
-INSTRUCTIONS:
-- Recommend all {movies.Count} movies using EXACT titles
-- Explain briefly why these match the request
-- {(0==0 ? "Mention how these connect to their previous interests if relevant" : "Keep it focused on current request")}
-- Make it sound natural and personalized
-- End by asking if they want more specific recommendations
-
-RESPONSE:";
-
-            var recommendationText = await CallLlmAsync(responsePrompt, "gemma3:1b", 0.7);
-            responseBuilder.AppendLine(recommendationText);
-
-            return new AssistantResponse
-            {
-                Response = responseBuilder.ToString(),
-                RecommendedMovies = movies,
-                ConversationId = conversation.ConversationId,
-                UsedDeepThink = false,
-                EmbeddingQuery = searchQuery
-            };
-        }
-
-        // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
         private string FormatGenres(string genresJson)
         {
             if (string.IsNullOrEmpty(genresJson)) return "Various";
@@ -546,18 +609,6 @@ RESPONSE:";
             {
                 return "Various";
             }
-        }
-
-        private AssistantResponse CreateFallbackResponse(string conversationId)
-        {
-            return new AssistantResponse
-            {
-                Response = "🎯 **User Preferences Analysis:**\n- No preferences data available\n\n🔍 **Search query**: `fallback`\n\nI found some movie recommendations for you!",
-                ConversationId = conversationId,
-                RecommendedMovies = new List<Movie>(),
-                UsedDeepThink = false,
-                EmbeddingQuery = "fallback"
-            };
         }
 
         private async Task<string> CallLlmAsync(string prompt, string model = "gemma3:1b", double temperature = 0.7)
@@ -595,15 +646,99 @@ RESPONSE:";
             return string.Empty;
         }
 
+        // ФОЛБЭК МЕТОД: Простой поиск
+        private async Task<AssistantResponse> ProcessFallbackSearchAsync(ConversationState conversation, string userMessage)
+        {
+            _logger.LogWarning("Using fallback search method");
+
+            try
+            {
+                var searchQuery = CreateSimpleSearchQuery(userMessage);
+                var movies = await _movieSearchTool.SearchMoviesAsync(searchQuery, 5);
+
+                var response = await GenerateSimpleMovieResponseAsync(movies, searchQuery, userMessage);
+
+                return new AssistantResponse
+                {
+                    Response = response,
+                    RecommendedMovies = movies,
+                    ConversationId = conversation.ConversationId,
+                    UsedDeepThink = false,
+                    EmbeddingQuery = searchQuery,
+                    ReasoningContext = "Fallback search method"
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in fallback search");
+                return CreateFallbackResponse(conversation.ConversationId);
+            }
+        }
+
+        private string CreateSimpleSearchQuery(string userMessage)
+        {
+            var stopWords = new HashSet<string> {
+                "хочу", "мне", "нужны", "фильмы", "кино", "посоветуй",
+                "найти", "какой", "что", "какие", "please", "recommend", "movie", "movies"
+            };
+
+            var words = userMessage.ToLower()
+                .Split(' ', ',', '.', '!', '?')
+                .Where(word => word.Length > 2 && !stopWords.Contains(word))
+                .Take(3);
+
+            return string.Join(" ", words) ?? "popular";
+        }
+
+        private async Task<string> GenerateSimpleMovieResponseAsync(List<Movie> movies, string searchQuery, string userMessage)
+        {
+            var prompt = $@"
+User asked: {userMessage}
+Search query: {searchQuery}
+
+Recommended movies:
+{string.Join("\n", movies.Select((m, i) => $"{i + 1}. {m.Title} ({m.ReleaseDate?.Year}) - {FormatGenres(m.Genres)}"))}
+
+Create a friendly, conversational response recommending these movies:";
+
+            return await CallLlmAsync(prompt, "gemma3:1b", 0.7);
+        }
+
+        // МЕТОД: Создание новой беседы
+        private ConversationState CreateNewConversation()
+        {
+            var conversation = new ConversationState();
+            conversation.ConversationId = "single-conversation";
+
+            conversation.Messages.Add(new Message
+            {
+                Role = "system",
+                Content = "You are a movie recommendation assistant with access to search tools. Always try to find and recommend exactly 5 movies from the database for every user request."
+            });
+
+            _logger.LogInformation("Created new single conversation with ID: {ConversationId}", conversation.ConversationId);
+            return conversation;
+        }
+
+        private AssistantResponse CreateFallbackResponse(string conversationId)
+        {
+            return new AssistantResponse
+            {
+                Response = "I found some great movie recommendations for you! Here are some popular choices that might interest you.",
+                ConversationId = conversationId,
+                RecommendedMovies = new List<Movie>(),
+                UsedDeepThink = false,
+                EmbeddingQuery = "fallback"
+            };
+        }
+
         public Task<ConversationState?> GetConversationStateAsync(string conversationId)
         {
-            // Всегда возвращаем текущую беседу, игнорируем conversationId
             return Task.FromResult<ConversationState?>(_currentConversation);
         }
 
         public Task<bool> DeleteConversationAsync(string conversationId)
         {
-            // При "удалении" просто сбрасываем беседу
             ResetConversation();
             return Task.FromResult(true);
         }
@@ -615,7 +750,26 @@ RESPONSE:";
         }
     }
 
-    // Классы моделей
+
+    // Существующие вспомогательные классы
+    public class SearchStrategy
+    {
+        public string SearchType { get; set; } = "general";
+        public string SearchQuery { get; set; } = string.Empty;
+        public string Reasoning { get; set; } = string.Empty;
+    }
+
+    public class UserIntentAnalysis
+    {
+        public string RawAnalysis { get; set; } = string.Empty;
+        public bool IsMoodBased { get; set; }
+        public bool IsGenreSpecific { get; set; }
+        public bool RequiresCreativeMatching { get; set; }
+        public List<string> DetectedGenres { get; set; } = new List<string>();
+        public string DetectedMood { get; set; } = string.Empty;
+        public List<string> KeyThemes { get; set; } = new List<string>();
+    }
+
     public class ConversationContext
     {
         public List<string> PrimaryGenres { get; set; } = new List<string>();

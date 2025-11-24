@@ -42,6 +42,7 @@ builder.Services.AddHttpClient("Ollama", client =>
     client.Timeout = TimeSpan.FromMinutes(5);
 });
 
+builder.Services.AddScoped<IMovieSearchToolService, MovieSearchToolService>();
 builder.Services.AddScoped<IMovieService, MovieService>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddScoped<IAssistantService, AssistantService>();
