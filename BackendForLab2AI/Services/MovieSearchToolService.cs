@@ -50,8 +50,13 @@ namespace BackendForLab2AI.Services
             {
                 _logger.LogInformation("Finding similar movies with query: {Query}, limit: {Limit}", query, limit);
 
-                var results = await _embeddingService.FindSimilarMoviesAsync(query, 46000, "bge-m3", "cosine");
-                return FilterAndSortMovies(results, limit);
+                var results = await _embeddingService.FindSimilarMoviesAsync(query, limit, "bge-m3", "cosine");
+                return results
+                        .OrderByDescending(r => r.SimilarityScore)
+                        .ThenByDescending(r => r.Movie.Popularity)
+                        .Take(limit)
+                        .Select(r => r.Movie)
+                        .ToList();
             }
             catch (Exception ex)
             {
@@ -70,23 +75,28 @@ namespace BackendForLab2AI.Services
                 {
                    // { "comedy", "funny hilarious comedy laugh humor popular" },
                     { "comedy", "Comedy" },
-                    { "drama", "drama emotional serious story award winning" },
-                    { "action", "action adventure exciting thriller blockbuster" },
-                    { "romance", "romance love relationship romantic heartfelt" },
-                    { "horror", "horror scary suspense thriller" },
-                    { "sci-fi", "sci-fi science fiction futuristic space" },
-                    { "fantasy", "fantasy magical adventure epic" },
-                    { "thriller", "thriller suspense mystery intense" },
-                    { "animation", "animation animated family cartoon" },
-                    { "adventure", "adventure journey exploration epic" }
+                    { "drama", "Drama" },
+                    { "action", "Action" },
+                    { "romance", "Romance" },
+                    { "horror", "Horror" },
+                    { "sci-fi", "Sci-fi" },
+                    { "fantasy", "Fantasy" },
+                    { "thriller", "Thriller" },
+                    { "animation", "Animation" },
+                    { "adventure", "Adventure" }
                 };
 
                 var searchQuery = genreMappings.ContainsKey(genre.ToLower())
                     ? genreMappings[genre.ToLower()]
-                    : genre + "action";
+                    : genre;
 
                 var results = await _embeddingService.FindSimilarMoviesAsync(searchQuery, 46000, "bge-m3", "cosine");
-                return FilterAndSortMovies(results, limit);
+
+                var movies = FilterAndSortMovies(results, limit * 4);
+                return movies.OrderBy(x => Random.Shared.Next()).Take(limit).ToList();
+
+                //var movies = FilterAndSortMovies(results, limit * 10);
+                //return movies.Take(limit).ToList();
             }
             catch (Exception ex)
             {
@@ -111,16 +121,18 @@ namespace BackendForLab2AI.Services
                     { "mysterious", "mystery thriller suspense mysterious" },
                     { "romantic", "romance love relationship romantic date" },
                     { "adventurous", "adventure action journey exploration" },
-                    { "scary", "horror scary恐怖 suspense thriller" },
+                    { "scary", "horror scary suspense thriller" },
                     { "thoughtful", "drama thoughtful philosophical deep" }
                 };
 
                 var query = moodQueries.ContainsKey(mood.ToLower())
                     ? moodQueries[mood.ToLower()]
-                    : mood + " mood";
-
+                    : mood;
                 var results = await _embeddingService.FindSimilarMoviesAsync(query, 46000, "bge-m3", "cosine");
-                return FilterAndSortMovies(results, limit);
+
+                var movies = FilterAndSortMovies(results, limit * 4);
+                return movies.OrderBy(x => Random.Shared.Next()).Take(limit).ToList();
+                //return FilterAndSortMovies(results, limit);
             }
             catch (Exception ex)
             {
@@ -130,16 +142,23 @@ namespace BackendForLab2AI.Services
         }
         private List<Movie> FilterAndSortMovies(List<MovieRecommendation> results, int limit)
         {
-            double Popularity = 20;
+            double Popularity = 50;
             List<Movie> FilteredResults = new List<Movie>();
-            while (FilteredResults.Count < limit && Popularity > 0)
+            double Similarity = 1;
+            while (FilteredResults.Count < limit && Similarity > 0.4)
             {
-                FilteredResults = results.Where(r => r.SimilarityScore >= 0.4)
-                    .Select(r => r.Movie)
-                    .Where(m => m.Popularity >= Popularity)
-                    .Take(limit)
-                    .OrderByDescending(m => m.Popularity).ToList();
-                Popularity--;
+                while (FilteredResults.Count < limit && Popularity > 10)
+                {
+                    FilteredResults = results.Where(r => r.SimilarityScore >= Similarity)
+                        .Select(r => r.Movie)
+                        .Where(m => m.Popularity >= Popularity)
+                        .Take(limit)
+                        .OrderByDescending(m => m.Popularity).ToList();
+                    Popularity--;
+                }
+                Similarity -= 0.01;
+                Popularity = 50;
+
             }
             Popularity = 10;
             if (FilteredResults.Count < limit)
@@ -155,6 +174,13 @@ namespace BackendForLab2AI.Services
 
 
             return FilteredResults;
+
+            //        return results
+            //.OrderByDescending(r => r.SimilarityScore)
+            //.ThenByDescending(r => r.Movie.Popularity)
+            //.Take(limit)
+            //.Select(r => r.Movie)
+            //.ToList();
         }
 
       

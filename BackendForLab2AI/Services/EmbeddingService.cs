@@ -189,19 +189,18 @@ namespace BackendForLab2AI.Services
                                    m.Overview.Length > 50)
                 };
 
-                var movies = await moviesWithoutEmbeddingsQuery
-                    .Take(10000)
-                    .ToListAsync();
+                var movies = await moviesWithoutEmbeddingsQuery.ToListAsync();
 
                 _logger.LogInformation("Generating {Model} embeddings for {Count} movies", model, movies.Count);
 
                 var embeddingsDict = new Dictionary<int, Vector>();
                 var floatEmbeddingsDict = new Dictionary<int, List<float>>(); // Для кэша
-
+                var k = 0;
                 foreach (var movie in movies)
                 {
                     try
                     {
+                        k++;
                         var text = BuildMovieText(movie);
                         var embedding = await GetEmbeddingAsync(text, model);
 
@@ -215,15 +214,14 @@ namespace BackendForLab2AI.Services
                             // Сохраняем для кэша как List<float>
                             floatEmbeddingsDict[movie.Id] = embedding;
 
-                            _logger.LogInformation("Generated {Model} embedding for: {Title}", model, movie.Title);
+                            _logger.LogInformation("Generated {Model} embedding num{k} for: {Title}", model, k,movie.Title);
                         }
-
                         // Сохраняем каждые 50 фильмов (для производительности)
-                        if (movies.IndexOf(movie) % 50 == 0)
-                        {
-                            await _context.SaveChangesAsync();
-                            _logger.LogInformation("Saved batch of {Model} embeddings to database", model);
-                        }
+                        //if (movies.IndexOf(movie) % 50 == 0)
+                        //{
+                        //    await _context.SaveChangesAsync();
+                        //    _logger.LogInformation("Saved batch of {Model} embeddings to database", model);
+                        //}
                     }
                     catch (Exception ex)
                     {
@@ -398,7 +396,7 @@ namespace BackendForLab2AI.Services
                 if (model == "bge-m3")
                     moviesWithEmbeddings = await _context.Movies.CountAsync(m => m.EmbeddingBgeM3 != null);
 
-                if (moviesWithEmbeddings < 10000)
+                if (moviesWithEmbeddings < 45000)
                 {
                     _logger.LogInformation("No embeddings found. Generating embeddings for movies...");
                     await GenerateAllMovieEmbeddingsAsync(model);

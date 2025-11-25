@@ -25,6 +25,10 @@ namespace BackendForLab2AI.Models
 
         public bool NeedsClarification { get; set; } = false;
         public List<ToolResult>? ToolResults { get; set; }
+
+        public string? SearchStrategy { get; set; }
+
+        public string? ClarificationType { get; set; }
     }
 
     public class ConversationState
@@ -44,6 +48,42 @@ namespace BackendForLab2AI.Models
         public string Content { get; set; } = string.Empty;
         public List<ToolCall>? ToolCalls { get; set; }
         public string? ToolCallId { get; set; }
+    }
+
+    // Существующие вспомогательные классы
+    public class SearchStrategy
+    {
+        public string SearchType { get; set; } = "general";
+        public string SearchQuery { get; set; } = string.Empty;
+        public string Reasoning { get; set; } = string.Empty;
+    }
+
+    public class UserIntentAnalysis
+    {
+        public string RawAnalysis { get; set; } = string.Empty;
+        public bool IsMoodBased { get; set; }
+        public bool IsGenreSpecific { get; set; }
+        public bool RequiresCreativeMatching { get; set; }
+        public List<string> DetectedGenres { get; set; } = new List<string>();
+        public string DetectedMood { get; set; } = string.Empty;
+        public List<string> KeyThemes { get; set; } = new List<string>();
+    }
+
+    public class ConversationContext
+    {
+        public List<string> PrimaryGenres { get; set; } = new List<string>();
+        public List<string> SecondaryGenres { get; set; } = new List<string>();
+        public List<string> Themes { get; set; } = new List<string>();
+        public List<string> Preferences { get; set; } = new List<string>();
+        public string Mood { get; set; } = string.Empty;
+        public bool IsContinuation { get; set; }
+        public bool IsGenreChange { get; set; }
+    }
+
+    public class Genre
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
     }
 
     public class UserPreferences
